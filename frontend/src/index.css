@@ -1,0 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html {
+    font-feature-settings: "kern", "liga", "calt";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-offwhite dark:bg-carbon-900 text-carbon dark:text-white font-sans;
+    min-height: 100vh;
+  }
+
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { @apply bg-transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-lgrayblue dark:bg-slate-600 rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-coolslate dark:bg-slate-500; }
+
+  ::selection { @apply bg-carbon/20 dark:bg-lgrayblue/20; }
+
+  /* Focus styles */
+  :focus-visible { outline: 2px solid #1E3246; outline-offset: 2px; border-radius: 6px; }
+  .dark :focus-visible { outline-color: #D2D7DC; }
+}
+
+@layer components {
+  /* Premium card hover state */
+  .card-interactive {
+    @apply transition-all duration-200 hover:shadow-card-hover hover:-translate-y-0.5 cursor-pointer;
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-clip-text text-transparent bg-gradient-primary;
+  }
+
+  /* SP badge chip */
+  .sp-chip {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold text-white;
+  }
+
+  /* Table row */
+  .table-row-hover {
+    @apply hover:bg-lgrayblue/10 dark:hover:bg-slate-700/20 transition-colors duration-100;
+  }
+
+  /* Sidebar active indicator */
+  .nav-active {
+    @apply bg-white/15 text-white;
+  }
+}
+
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+
+  /* Glass morphism */
+  .glass {
+    @apply bg-white/70 dark:bg-carbon-800/70 backdrop-blur-md border border-white/20 dark:border-white/10;
+  }
+
+  /* Subtle gradient border */
+  .gradient-border {
+    background: linear-gradient(white, white) padding-box,
+                linear-gradient(135deg, #1E3246, #19AA6E) border-box;
+    border: 2px solid transparent;
+  }
+  .dark .gradient-border {
+    background: linear-gradient(#1a2a3a, #1a2a3a) padding-box,
+                linear-gradient(135deg, #1E3246, #19AA6E) border-box;
+  }
+}
