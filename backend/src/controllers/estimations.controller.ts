@@ -14,9 +14,12 @@ const createSchema = z.object({
 });
 
 const actualsSchema = z.object({
-  actual_hours: z.number().positive(),
+  estimated_hours: z.number().positive().optional(),
+  actual_hours: z.number().positive().optional(),
   completed_at: z.string().optional(),
   notes: z.string().optional(),
+}).refine(d => d.estimated_hours != null || d.actual_hours != null, {
+  message: 'Either estimated_hours or actual_hours must be provided',
 });
 
 export async function getAll(req: Request, res: Response): Promise<void> {
@@ -114,29 +117,48 @@ export async function update(req: Request, res: Response): Promise<void> {
 
 export async function recordActuals(req: Request, res: Response): Promise<void> {
   const body = actualsSchema.parse(req.body);
-  const est = await queryOne<{ revised_min_hours: number; title: string }>(
-    `SELECT revised_min_hours, title FROM estimations WHERE id = $1`, [req.params.id]
+  const est = await queryOne<{ estimated_hours: number | null; revised_min_hours: number; title: string }>(
+    `SELECT estimated_hours, revised_min_hours, title FROM estimations WHERE id = $1`, [req.params.id]
   );
   if (!est) { res.status(404).json({ success: false, error: 'Estimation not found' }); return; }
 
-  const minHours = Number(est.revised_min_hours);
-  const variance = body.actual_hours - minHours;
-  const accuracy = minHours > 0 ? Math.max(0, (1 - Math.abs(variance) / minHours) * 100) : 0;
-  const actualDays = body.actual_hours / 8;
+  // Phase 1: Save estimated_hours only — do not change status or compute metrics
+  if (body.actual_hours == null) {
+    const row = await queryOne(
+      `UPDATE estimations SET estimated_hours=$1, notes=COALESCE($2, notes) WHERE id=$3 RETURNING *`,
+      [body.estimated_hours!, body.notes ?? null, req.params.id]
+    );
+    res.json({ success: true, data: row });
+    return;
+  }
+
+  // Phase 2: Record actual hours and compute metrics
+  // Use estimated_hours from body → DB → fall back to revised_min_hours
+  const estimatedHours =
+    body.estimated_hours != null ? body.estimated_hours :
+    est.estimated_hours != null ? Number(est.estimated_hours) :
+    Number(est.revised_min_hours);
+
+  const actualHours = body.actual_hours;
+  const variance = actualHours - estimatedHours;
+  const accuracy = estimatedHours > 0 ? Math.max(0, (1 - Math.abs(variance) / estimatedHours) * 100) : 0;
+  const actualDays = actualHours / 8;
 
   const row = await queryOne(
     `UPDATE estimations
      SET actual_hours=$1, actual_days=$2, completed_at=$3, variance_hours=$4,
-         accuracy_percent=$5, notes=COALESCE($6, notes), status='completed'
-     WHERE id=$7 RETURNING *`,
-    [body.actual_hours, actualDays, body.completed_at || new Date().toISOString(), variance, accuracy, body.notes, req.params.id]
+         accuracy_percent=$5, estimated_hours=COALESCE($6, estimated_hours),
+         notes=COALESCE($7, notes), status='completed'
+     WHERE id=$8 RETURNING *`,
+    [actualHours, actualDays, body.completed_at || new Date().toISOString(), variance, accuracy,
+     body.estimated_hours ?? null, body.notes ?? null, req.params.id]
   );
 
   await query(
     `INSERT INTO notifications (type, title, message) VALUES ($1, $2, $3)`,
     [
       accuracy >= 85 ? 'success' : accuracy >= 70 ? 'warning' : 'error',
-      'Estimate Submitted',
+      'Actuals Recorded',
       `"${est.title}" completed with ${accuracy.toFixed(1)}% accuracy (${variance >= 0 ? '+' : ''}${variance.toFixed(1)} hrs variance)`,
     ]
   );
@@ -148,4 +170,65 @@ export async function remove(req: Request, res: Response): Promise<void> {
   const row = await queryOne(`DELETE FROM estimations WHERE id=$1 RETURNING id`, [req.params.id]);
   if (!row) { res.status(404).json({ success: false, error: 'Estimation not found' }); return; }
   res.json({ success: true, message: 'Estimation deleted' });
+}
+
+const importRowSchema = z.object({
+  title: z.string().min(1).max(255),
+  project_name: z.string().optional(),
+  description: z.string().optional(),
+  complexity: z.enum(['Low', 'Medium', 'High', 'Very High', 'Unmanageable']),
+  risk: z.enum(['Low', 'Medium', 'High', 'Very High', 'Unknown']),
+  competency: z.enum(['Emerging', 'Competent', 'Expert']),
+  notes: z.string().optional(),
+});
+
+const batchImportSchema = z.object({
+  rows: z.array(importRowSchema).min(1).max(500),
+});
+
+export async function batchImport(req: Request, res: Response): Promise<void> {
+  const { rows } = batchImportSchema.parse(req.body);
+  let created = 0;
+  const errors: { row: number; error: string }[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    try {
+      const calc = await runFullEstimation(row.complexity, row.risk, row.competency);
+      if (!calc) {
+        errors.push({ row: i + 1, error: 'No story point configuration for this Complexity + Risk combination' });
+        continue;
+      }
+      await query(
+        `INSERT INTO estimations
+           (title, description, project_name, complexity, risk, competency,
+            story_points, initial_min_days, initial_max_days, initial_min_hours, initial_max_hours,
+            overhead_percent, revised_min_days, revised_max_days, revised_min_hours, revised_max_hours, notes)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+        [
+          row.title, row.description ?? null, row.project_name ?? null,
+          row.complexity, row.risk, row.competency,
+          calc.story_points,
+          calc.initial_min_days, calc.initial_max_days,
+          calc.initial_min_hours, calc.initial_max_hours,
+          calc.overhead_percent,
+          calc.revised_min_days, calc.revised_max_days,
+          calc.revised_min_hours, calc.revised_max_hours,
+          row.notes ?? null,
+        ]
+      );
+      created++;
+    } catch (e) {
+      errors.push({ row: i + 1, error: e instanceof Error ? e.message : 'Import failed' });
+    }
+  }
+
+  if (created > 0) {
+    await query(
+      `INSERT INTO notifications (type, title, message) VALUES ('info', $1, $2)`,
+      ['Bulk Import', `${created} estimation${created !== 1 ? 's' : ''} imported via Excel`]
+    ).catch(() => {});
+  }
+
+  res.json({ success: true, created, errors });
 }

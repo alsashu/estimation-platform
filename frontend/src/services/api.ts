@@ -75,11 +75,14 @@ export const estimationsApi = {
   update: (id: string, body: Partial<Estimation>) =>
     api.put<{ success: boolean; data: Estimation }>(`/estimations/${id}`, body).then(r => r.data.data!),
 
-  recordActuals: (id: string, body: { actual_hours: number; completed_at?: string; notes?: string }) =>
+  recordActuals: (id: string, body: { estimated_hours?: number; actual_hours?: number; completed_at?: string; notes?: string }) =>
     api.patch<{ success: boolean; data: Estimation }>(`/estimations/${id}/actuals`, body).then(r => r.data.data!),
 
   delete: (id: string) =>
     api.delete<{ success: boolean }>(`/estimations/${id}`).then(r => r.data),
+
+  batchImport: (rows: { title: string; project_name?: string; description?: string; complexity: string; risk: string; competency: string; notes?: string }[]) =>
+    api.post<{ success: boolean; created: number; errors: { row: number; error: string }[] }>('/estimations/import', { rows }).then(r => r.data),
 };
 
 // ─── Master Data ──────────────────────────────────────────────────────────

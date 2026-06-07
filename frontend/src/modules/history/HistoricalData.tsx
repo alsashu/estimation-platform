@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { History, Plus, Search, Filter, Download, Eye, Edit2, Trash2, CheckCircle, ClipboardList } from 'lucide-react';
+import { History, Plus, Search, Filter, Download, Eye, Edit2, Trash2, CheckCircle, ClipboardList, Save, Upload } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { estimationsApi } from '../../services/api';
+import { ImportModal } from './ImportModal';
 import { Button, Card, Badge, Drawer, Modal, EmptyState, SearchInput, Skeleton, SPDot, ConfirmDialog } from '../../components/ui';
 import { useToastStore } from '../../store';
 import { fmt, accuracyBg, accuracyColor, cn } from '../../utils/formatters';
@@ -40,13 +41,29 @@ function EstimationRow({ est, onView, onDelete }: { est: Estimation; onView: (e:
         </div>
       </td>
       <td className="px-4 py-3.5 hidden sm:table-cell">
+        {est.estimated_hours != null
+          ? <p className="text-sm font-semibold text-carbon dark:text-white">{fmt.hours(est.estimated_hours)}</p>
+          : <span className="text-coolslate text-xs">—</span>}
+      </td>
+      <td className="px-4 py-3.5 hidden sm:table-cell">
         {est.actual_hours != null ? (
           <div>
             <p className="text-sm font-semibold text-carbon dark:text-white">{fmt.hours(est.actual_hours)}</p>
             {est.actual_days != null && (
-              <p className="text-xs text-coolslate hidden sm:block">{fmt.days(est.actual_days)}</p>
+              <p className="text-xs text-coolslate">{fmt.days(est.actual_days)}</p>
             )}
           </div>
+        ) : <span className="text-coolslate text-xs">—</span>}
+      </td>
+      <td className="px-4 py-3.5 hidden lg:table-cell">
+        {est.variance_hours != null ? (
+          <span className={cn('text-sm font-semibold',
+            Number(est.variance_hours) > 0 ? 'text-vibrant' :
+            Number(est.variance_hours) < 0 ? 'text-greenline' :
+            'text-carbon dark:text-white'
+          )}>
+            {fmt.variance(est.variance_hours)}
+          </span>
         ) : <span className="text-coolslate text-xs">—</span>}
       </td>
       <td className="px-4 py-3.5 hidden lg:table-cell">
@@ -76,52 +93,111 @@ function EstimationRow({ est, onView, onDelete }: { est: Estimation; onView: (e:
   );
 }
 
-function ActualsForm({ estimation, onSave, loading }: { estimation: Estimation; onSave: (data: { actual_hours: number; notes?: string }) => void; loading: boolean }) {
-  const [hours, setHours] = useState('');
+function ActualsForm({ estimation, onSave, loading }: {
+  estimation: Estimation;
+  onSave: (data: { estimated_hours?: number; actual_hours?: number; notes?: string }) => void;
+  loading: boolean;
+}) {
+  const [estimatedHours, setEstimatedHours] = useState('');
+  const [actualHours, setActualHours] = useState('');
   const [notes, setNotes] = useState(estimation.notes || '');
 
-  const parsed = parseFloat(hours);
-  const valid = !isNaN(parsed) && parsed > 0;
-  const minHours = Number(estimation.revised_min_hours);
-  const derivedDays = valid ? parsed / 8 : null;
-  const derivedAccuracy = valid && minHours > 0 ? Math.max(0, (1 - Math.abs(parsed - minHours) / minHours) * 100) : null;
+  const hasEstimate = estimation.estimated_hours != null;
+  const savedEstimate = hasEstimate ? Number(estimation.estimated_hours) : null;
 
+  const parsedEst = parseFloat(estimatedHours);
+  const validEst = !isNaN(parsedEst) && parsedEst > 0;
+
+  const parsedAct = parseFloat(actualHours);
+  const validAct = !isNaN(parsedAct) && parsedAct > 0;
+
+  // Metrics preview — only when actual hours is entered in Phase 2
+  let previewAccuracy: number | null = null;
+  let previewVariance: number | null = null;
+  let previewDeviation: number | null = null;
+  if (validAct && savedEstimate != null && savedEstimate > 0) {
+    previewVariance = parsedAct - savedEstimate;
+    previewDeviation = Math.abs(previewVariance) / savedEstimate * 100;
+    previewAccuracy = Math.max(0, 100 - previewDeviation);
+  }
+
+  const inputClass = 'w-full px-3 py-2.5 rounded-lg border border-lgrayblue dark:border-slate-600 bg-white dark:bg-carbon-800 text-sm text-carbon dark:text-white focus:outline-none focus:ring-2 focus:ring-carbon/20 focus:border-carbon transition-colors';
+  const textareaClass = `${inputClass} resize-none`;
+
+  if (!hasEstimate) {
+    // Phase 1: Enter estimated hours before starting the task
+    return (
+      <div className="space-y-4">
+        <div>
+          <label className="text-sm font-medium text-carbon dark:text-lgrayblue block mb-1">Estimated Hours *</label>
+          <input type="number" value={estimatedHours} onChange={(e) => setEstimatedHours(e.target.value)}
+            min="0" step="0.5" placeholder="e.g. 40" className={inputClass}
+          />
+          <p className="text-xs text-coolslate mt-1">Enter your estimate before starting work. System revised range: {fmt.range(estimation.revised_min_hours, estimation.revised_max_hours, 'hrs')}</p>
+        </div>
+        <div>
+          <label className="text-sm font-medium text-carbon dark:text-lgrayblue block mb-1">Notes</label>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
+            placeholder="Any notes about your estimate…" className={textareaClass}
+          />
+        </div>
+        <Button variant="outline" onClick={() => validEst && onSave({ estimated_hours: parsedEst, notes })}
+          loading={loading} disabled={!validEst} className="w-full">
+          <Save size={15} /> Save Estimate
+        </Button>
+      </div>
+    );
+  }
+
+  // Phase 2: Enter actual hours after completing the task
   return (
     <div className="space-y-4">
-      <div>
-        <label className="text-sm font-medium text-carbon dark:text-lgrayblue block mb-1">Your Estimated Hours *</label>
-        <input type="number" value={hours} onChange={(e) => setHours(e.target.value)} min="0" step="0.5" placeholder="e.g. 72"
-          className="w-full px-3 py-2.5 rounded-lg border border-lgrayblue dark:border-slate-600 bg-white dark:bg-carbon-800 text-sm text-carbon dark:text-white focus:outline-none focus:ring-2 focus:ring-carbon/20 focus:border-carbon transition-colors"
-        />
-        <p className="text-xs text-coolslate mt-1">System revised range: {fmt.range(estimation.revised_min_hours, estimation.revised_max_hours, 'hrs')}</p>
+      <div className="bg-lgrayblue/15 dark:bg-carbon-800/50 rounded-xl p-3 flex items-center justify-between">
+        <div>
+          <p className="text-xs text-coolslate">Your Estimate</p>
+          <p className="text-sm font-semibold text-carbon dark:text-white">{fmt.hours(savedEstimate!)}</p>
+        </div>
+        <span className="text-xs text-coolslate">System: {fmt.range(estimation.revised_min_hours, estimation.revised_max_hours, 'hrs')}</span>
       </div>
-
-      {valid && derivedDays !== null && derivedAccuracy !== null && (
+      <div>
+        <label className="text-sm font-medium text-carbon dark:text-lgrayblue block mb-1">Actual Hours *</label>
+        <input type="number" value={actualHours} onChange={(e) => setActualHours(e.target.value)}
+          min="0" step="0.5" placeholder="e.g. 45" className={inputClass}
+        />
+        <p className="text-xs text-coolslate mt-1">Enter hours actually spent after completing the task.</p>
+      </div>
+      {validAct && previewAccuracy !== null && (
         <div className="bg-lgrayblue/15 dark:bg-carbon-800/50 rounded-xl p-3 space-y-2">
-          <p className="text-[10px] font-semibold text-coolslate uppercase tracking-widest">Auto-calculated</p>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <p className="text-xs text-coolslate mb-0.5">Actual Days</p>
-              <p className="text-sm font-semibold text-carbon dark:text-white">{derivedDays.toFixed(2)} days</p>
-            </div>
+          <p className="text-[10px] font-semibold text-coolslate uppercase tracking-widest">Calculated Metrics</p>
+          <div className="grid grid-cols-3 gap-2">
             <div>
               <p className="text-xs text-coolslate mb-0.5">Accuracy</p>
-              <p className={cn('text-sm font-semibold', derivedAccuracy >= 85 ? 'text-greenline' : derivedAccuracy >= 70 ? 'text-gold' : 'text-vibrant')}>
-                {derivedAccuracy.toFixed(1)}%
+              <p className={cn('text-sm font-semibold', previewAccuracy >= 85 ? 'text-greenline' : previewAccuracy >= 70 ? 'text-gold' : 'text-vibrant')}>
+                {previewAccuracy.toFixed(1)}%
               </p>
+            </div>
+            <div>
+              <p className="text-xs text-coolslate mb-0.5">Variance</p>
+              <p className={cn('text-sm font-semibold', previewVariance! > 0 ? 'text-vibrant' : 'text-greenline')}>
+                {fmt.variance(previewVariance!)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-coolslate mb-0.5">Deviation</p>
+              <p className="text-sm font-semibold text-carbon dark:text-white">{previewDeviation!.toFixed(1)}%</p>
             </div>
           </div>
         </div>
       )}
-
       <div>
         <label className="text-sm font-medium text-carbon dark:text-lgrayblue block mb-1">Notes</label>
-        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Any notes about the actual effort…"
-          className="w-full px-3 py-2.5 rounded-lg border border-lgrayblue dark:border-slate-600 bg-white dark:bg-carbon-800 text-sm text-carbon dark:text-white focus:outline-none focus:ring-2 focus:ring-carbon/20 focus:border-carbon transition-colors resize-none"
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
+          placeholder="Any notes about the actual effort…" className={textareaClass}
         />
       </div>
-      <Button variant="success" onClick={() => valid && onSave({ actual_hours: parsed, notes })} loading={loading} disabled={!valid} className="w-full">
-        <CheckCircle size={15} /> Submit Estimate
+      <Button variant="success" onClick={() => validAct && onSave({ actual_hours: parsedAct, notes })}
+        loading={loading} disabled={!validAct} className="w-full">
+        <CheckCircle size={15} /> Record Actuals
       </Button>
     </div>
   );
@@ -137,6 +213,7 @@ export default function HistoricalData() {
   const [page, setPage] = useState(1);
   const [drawerEst, setDrawerEst] = useState<Estimation | null>(null);
   const [deleteEst, setDeleteEst] = useState<Estimation | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const params = { search: search || undefined, complexity: complexity || undefined, risk: risk || undefined, status: status || undefined, page, limit: 15 };
 
@@ -147,12 +224,16 @@ export default function HistoricalData() {
   });
 
   const actualsMutation = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: { actual_hours: number; notes?: string } }) => estimationsApi.recordActuals(id, body),
+    mutationFn: ({ id, body }: { id: string; body: { estimated_hours?: number; actual_hours?: number; notes?: string } }) => estimationsApi.recordActuals(id, body),
     onSuccess: (updated) => {
       qc.invalidateQueries({ queryKey: ['estimations'] });
-      qc.invalidateQueries({ queryKey: ['analysis-summary'] });
       setDrawerEst(updated);
-      addToast({ type: 'success', title: 'Estimate submitted', message: updated.accuracy_percent != null ? `${Number(updated.accuracy_percent).toFixed(1)}% accuracy` : '' });
+      if (updated.actual_hours != null) {
+        qc.invalidateQueries({ queryKey: ['analysis-summary'] });
+        addToast({ type: 'success', title: 'Actuals recorded', message: updated.accuracy_percent != null ? `${Number(updated.accuracy_percent).toFixed(1)}% accuracy` : '' });
+      } else {
+        addToast({ type: 'success', title: 'Estimate saved' });
+      }
     },
     onError: (e: Error) => addToast({ type: 'error', title: 'Error', message: e.message }),
   });
@@ -182,6 +263,7 @@ export default function HistoricalData() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" icon={<Download size={15} />}>Export CSV</Button>
+          <Button variant="outline" size="sm" icon={<Upload size={15} />} onClick={() => setImportOpen(true)}>Import Excel</Button>
           <Link to="/estimate"><Button size="sm" icon={<Plus size={15} />}>New Estimate</Button></Link>
         </div>
       </div>
@@ -214,7 +296,7 @@ export default function HistoricalData() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-lgrayblue/30 dark:border-slate-700">
-                {['Task', 'Complexity', 'SP', 'Revised Effort', 'Your Est.', 'Accuracy', 'Status', 'Date', ''].map((h) => (
+                {['Task', 'Complexity', 'SP', 'Revised Effort', 'Est. Hours', 'Actual Hours', 'Variance', 'Accuracy', 'Status', 'Date', ''].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-coolslate uppercase tracking-wide first:pl-5">
                     {h}
                   </th>
@@ -225,13 +307,13 @@ export default function HistoricalData() {
               {isLoading ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={i} className="border-b border-lgrayblue/20 dark:border-slate-700/40">
-                    {Array.from({ length: 9 }).map((_, j) => (
+                    {Array.from({ length: 11 }).map((_, j) => (
                       <td key={j} className="px-4 py-3.5"><Skeleton className="h-4 w-full" /></td>
                     ))}
                   </tr>
                 ))
               ) : estimations.length === 0 ? (
-                <tr><td colSpan={9}>
+                <tr><td colSpan={11}>
                   <EmptyState icon={<ClipboardList size={28} />} title="No estimations found"
                     message={search || complexity ? "Try adjusting your filters" : "Create your first estimation to get started"}
                     action={<Link to="/estimate"><Button size="sm">New Estimate</Button></Link>}
@@ -292,16 +374,29 @@ export default function HistoricalData() {
                 ))}
               </div>
             </div>
+            {drawerEst.estimated_hours != null && drawerEst.actual_hours == null && (
+              <div className="bg-lgrayblue/20 dark:bg-carbon-800/50 border border-lgrayblue/30 dark:border-slate-700 rounded-xl p-3">
+                <p className="text-xs font-semibold text-coolslate uppercase tracking-wide mb-1">Estimate Saved</p>
+                <p className="text-sm font-semibold text-carbon dark:text-white">{fmt.hours(Number(drawerEst.estimated_hours))}</p>
+                <p className="text-xs text-coolslate mt-0.5">Awaiting actual hours after task completion</p>
+              </div>
+            )}
             {drawerEst.actual_hours != null && (
-              <div className="bg-greenline/10 border border-greenline/20 rounded-xl p-4 space-y-2">
-                <p className="text-xs font-semibold text-greenline uppercase tracking-wide">Estimate Submitted</p>
+              <div className="bg-greenline/10 border border-greenline/20 rounded-xl p-4 space-y-3">
+                <p className="text-xs font-semibold text-greenline uppercase tracking-wide">Actuals Recorded</p>
                 <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div><span className="text-coolslate">Your Est.: </span><span className="font-semibold text-carbon dark:text-white">{fmt.hours(drawerEst.actual_hours)}</span></div>
+                  {drawerEst.estimated_hours != null && (
+                    <div><span className="text-coolslate">Estimated: </span><span className="font-semibold text-carbon dark:text-white">{fmt.hours(drawerEst.estimated_hours)}</span></div>
+                  )}
+                  <div><span className="text-coolslate">Actual: </span><span className="font-semibold text-carbon dark:text-white">{fmt.hours(drawerEst.actual_hours)}</span></div>
                   <div><span className="text-coolslate">Variance: </span><span className="font-semibold text-carbon dark:text-white">{fmt.variance(drawerEst.variance_hours || 0)}</span></div>
+                  {drawerEst.accuracy_percent != null && (
+                    <div><span className="text-coolslate">Deviation: </span><span className="font-semibold text-carbon dark:text-white">{(100 - Number(drawerEst.accuracy_percent)).toFixed(1)}%</span></div>
+                  )}
                 </div>
                 {drawerEst.accuracy_percent != null && (
                   <div className="text-center mt-2">
-                    <span className={cn('text-2xl font-display font-bold', accuracyColor(drawerEst.accuracy_percent))}>
+                    <span className={cn('text-2xl font-display font-bold', accuracyColor(Number(drawerEst.accuracy_percent)))}>
                       {Number(drawerEst.accuracy_percent).toFixed(1)}%
                     </span>
                     <p className="text-xs text-coolslate">accuracy</p>
@@ -311,9 +406,11 @@ export default function HistoricalData() {
             )}
             {drawerEst.status === 'open' && (
               <div className="border-t border-lgrayblue/30 dark:border-slate-700 pt-5">
-                <p className="text-sm font-semibold text-carbon dark:text-white mb-3">Submit Your Estimate</p>
+                <p className="text-sm font-semibold text-carbon dark:text-white mb-3">
+                  {drawerEst.estimated_hours == null ? 'Save Your Estimate' : 'Record Actual Time'}
+                </p>
                 <ActualsForm estimation={drawerEst}
-                  onSave={(body) => actualsMutation.mutate({ id: drawerEst.id, body })}
+                  onSave={(data) => actualsMutation.mutate({ id: drawerEst.id, body: data })}
                   loading={actualsMutation.isPending}
                 />
               </div>
@@ -328,6 +425,13 @@ export default function HistoricalData() {
           </div>
         )}
       </Drawer>
+
+      {/* Import modal */}
+      <ImportModal
+        isOpen={importOpen}
+        onClose={() => setImportOpen(false)}
+        onSuccess={() => qc.invalidateQueries({ queryKey: ['estimations'] })}
+      />
 
       {/* Delete confirm */}
       <ConfirmDialog

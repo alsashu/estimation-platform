@@ -31,6 +31,7 @@ router.get('/definitions/risk',        sp.getRiskDefs);
 router.get   ('/estimations/calculate',  est.calculate);
 router.get   ('/estimations',            est.getAll);
 router.post  ('/estimations',            est.create);
+router.post  ('/estimations/import',     est.batchImport);
 router.get   ('/estimations/:id',        est.getById);
 router.put   ('/estimations/:id',        est.update);
 router.patch ('/estimations/:id/actuals', est.recordActuals);

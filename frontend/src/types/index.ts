@@ -92,6 +92,7 @@ export interface Estimation {
   revised_max_days: number;
   revised_min_hours: number;
   revised_max_hours: number;
+  estimated_hours?: number;
   actual_hours?: number;
   actual_days?: number;
   completed_at?: string;
