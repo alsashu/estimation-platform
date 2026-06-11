@@ -9,7 +9,7 @@ import { Button, Card, StepIndicator, Modal, SPDot } from '../../components/ui';
 import { useToastStore } from '../../store';
 import { fmt, cn } from '../../utils/formatters';
 import { SP_COLORS, COMPLEXITY_COLORS, RISK_COLORS, COMPETENCY_COLORS } from '../../config/theme';
-import type { ComplexityLevel, RiskLevel, CompetencyLevel } from '../../types';
+import type { ComplexityLevel, RiskLevel, CompetencyLevel, CalculationResult } from '../../types';
 
 const COMPLEXITIES: ComplexityLevel[] = ['Low', 'Medium', 'High', 'Very High', 'Unmanageable'];
 const RISKS: RiskLevel[] = ['Low', 'Medium', 'High', 'Very High', 'Unknown'];
@@ -56,7 +56,7 @@ function LivePreview({ calc, complexity, risk, competency }: { calc?: Calculatio
     );
   }
   return (
-    <Card padding="p-4" className="bg-gradient-to-br from-carbon/3 to-transparent dark:from-carbon-800/50 border-carbon/10">
+    <Card padding="p-4" className="bg-gradient-to-br from-carbon/3 to-transparent dark:from-carbon-800/50 border-carbon/10 overflow-hidden">
       <div className="flex items-center gap-2 mb-3">
         <Zap size={14} className="text-gold" />
         <span className="text-xs font-semibold text-carbon dark:text-white uppercase tracking-wide">Live Preview</span>
@@ -74,9 +74,9 @@ function LivePreview({ calc, complexity, risk, competency }: { calc?: Calculatio
               { label: 'Overhead', value: fmt.pct(calc.overhead_percent) },
               { label: '', value: '' },
             ].map(({ label, value }) => label ? (
-              <div key={label} className="bg-white/60 dark:bg-carbon-700/50 rounded-lg p-2">
-                <p className="text-coolslate">{label}</p>
-                <p className="font-semibold text-carbon dark:text-white">{value}</p>
+              <div key={label} className="bg-white/60 dark:bg-carbon-700/50 rounded-lg p-2 min-w-0">
+                <p className="text-coolslate truncate">{label}</p>
+                <p className="font-semibold text-carbon dark:text-white truncate">{value}</p>
               </div>
             ) : null)}
           </div>
@@ -157,9 +157,9 @@ export default function EstimationWizard() {
               style={{ borderColor: colors[opt], background: value === opt ? colors[opt] : 'transparent' }}>
               {value === opt && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
             </span>
-            <div className="min-w-0">
-              <span className="text-sm font-semibold text-carbon dark:text-white">{opt}</span>
-              <p className="text-xs text-coolslate mt-0.5 line-clamp-1">{descriptions[opt]}</p>
+            <div className="min-w-0 flex-1">
+              <span className="text-sm font-semibold text-carbon dark:text-white block">{opt}</span>
+              <p className="text-xs text-coolslate mt-0.5 break-words line-clamp-2">{descriptions[opt]}</p>
             </div>
           </button>
         ))}
@@ -172,7 +172,7 @@ export default function EstimationWizard() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-display font-bold text-carbon dark:text-white flex items-center gap-2">
-            <Calculator size={22} /> New Estimation
+            <Calculator size={22} /> Storypoint Estimation
           </h1>
           <p className="text-sm text-coolslate mt-0.5">Follow the steps to calculate revised effort estimates</p>
         </div>
@@ -186,11 +186,11 @@ export default function EstimationWizard() {
       <form onSubmit={handleSubmit(onSubmit)}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           {/* Main content */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 min-w-0 overflow-hidden">
             <AnimatePresence mode="wait">
               {step === 0 && (
-                <motion.div key="step0" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} className="space-y-5">
-                  <Card padding="p-5">
+                <motion.div key="step0" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} className="space-y-5 w-full min-w-0">
+                  <Card padding="p-5" className="overflow-hidden">
                     <h2 className="font-display font-semibold text-carbon dark:text-white mb-4">Task Details</h2>
                     <div className="space-y-4">
                       <div>
@@ -216,11 +216,11 @@ export default function EstimationWizard() {
                     </div>
                   </Card>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <Card padding="p-5">
+                    <Card padding="p-5" className="min-w-0 overflow-hidden">
                       <h3 className="font-semibold text-carbon dark:text-white mb-3 text-sm">Complexity Level *</h3>
                       <RadioGroup options={COMPLEXITIES} value={complexity} onChange={(v) => setValue('complexity', v)} colors={COMPLEXITY_COLORS} descriptions={COMPLEXITY_DESC} />
                     </Card>
-                    <Card padding="p-5">
+                    <Card padding="p-5" className="min-w-0 overflow-hidden">
                       <h3 className="font-semibold text-carbon dark:text-white mb-3 text-sm">Risk Level *</h3>
                       <RadioGroup options={RISKS} value={risk} onChange={(v) => setValue('risk', v)} colors={RISK_COLORS} descriptions={RISK_DESC} />
                     </Card>
@@ -235,8 +235,8 @@ export default function EstimationWizard() {
               )}
 
               {step === 1 && (
-                <motion.div key="step1" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} className="space-y-5">
-                  <Card padding="p-5">
+                <motion.div key="step1" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} className="space-y-5 w-full min-w-0">
+                  <Card padding="p-5" className="overflow-hidden">
                     <h2 className="font-display font-semibold text-carbon dark:text-white mb-1">Assign Competency Level</h2>
                     <p className="text-xs text-coolslate mb-4">Select the competency level of the engineer(s) who will perform this task.</p>
                     <RadioGroup options={COMPETENCIES} value={competency} onChange={(v) => setValue('competency', v)} colors={COMPETENCY_COLORS} descriptions={COMPETENCY_DESC} />
@@ -260,17 +260,17 @@ export default function EstimationWizard() {
               )}
 
               {step === 2 && (
-                <motion.div key="step2" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} className="space-y-5">
-                  <Card padding="p-5">
+                <motion.div key="step2" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} className="space-y-5 w-full min-w-0">
+                  <Card padding="p-5" className="overflow-hidden">
                     <h2 className="font-display font-semibold text-carbon dark:text-white mb-4">Estimation Summary</h2>
                     <div className="space-y-3">
                       {[
                         ['Task', watch('title')], ['Project', watch('project_name') || '—'],
                         ['Complexity', complexity], ['Risk', risk], ['Competency', competency],
                       ].map(([l, v]) => (
-                        <div key={l} className="flex justify-between text-sm border-b border-lgrayblue/20 dark:border-slate-700/50 pb-2 last:border-0">
-                          <span className="text-coolslate">{l}</span>
-                          <span className="font-medium text-carbon dark:text-white">{v}</span>
+                        <div key={l} className="flex justify-between gap-4 text-sm border-b border-lgrayblue/20 dark:border-slate-700/50 pb-2 last:border-0">
+                          <span className="text-coolslate flex-shrink-0">{l}</span>
+                          <span className="font-medium text-carbon dark:text-white text-right truncate">{v}</span>
                         </div>
                       ))}
                     </div>
@@ -285,9 +285,9 @@ export default function EstimationWizard() {
                             [`Initial × (1 + ${fmt.pct(calc.overhead_percent)})`, `${fmt.range(calc.revised_min_days, calc.revised_max_days, 'days')} revised`],
                             [`Days × 8`, `${fmt.range(calc.revised_min_hours, calc.revised_max_hours, 'hrs')} revised`],
                           ].map(([input, output], i) => (
-                            <div key={i} className="flex items-center justify-between gap-2">
-                              <span className="text-coolslate">{input}</span>
-                              <span className="text-carbon dark:text-white font-medium">→ {output}</span>
+                            <div key={i} className="flex items-start justify-between gap-2 min-w-0">
+                              <span className="text-coolslate min-w-0 break-words">{input}</span>
+                              <span className="text-carbon dark:text-white font-medium flex-shrink-0">→ {output}</span>
                             </div>
                           ))}
                         </div>
@@ -296,7 +296,7 @@ export default function EstimationWizard() {
                             { label: 'Revised Min', days: calc.revised_min_days, hours: calc.revised_min_hours },
                             { label: 'Revised Max', days: calc.revised_max_days, hours: calc.revised_max_hours },
                           ].map((col) => (
-                            <div key={col.label} className="bg-carbon dark:bg-carbon-800 rounded-xl p-3 text-center">
+                            <div key={col.label} className="bg-carbon dark:bg-carbon-800 rounded-xl p-3 text-center min-w-0">
                               <p className="text-white/60 text-xs">{col.label}</p>
                               <p className="text-white text-lg font-display font-bold">{Number(col.hours).toFixed(1)} hrs</p>
                               <p className="text-white/50 text-xs">{Number(col.days).toFixed(2)} days</p>
@@ -322,7 +322,7 @@ export default function EstimationWizard() {
           </div>
 
           {/* Sidebar preview */}
-          <div className="space-y-4">
+          <div className="space-y-4 min-w-0">
             <LivePreview calc={calc} complexity={complexity} risk={risk} competency={competency} />
           </div>
         </div>

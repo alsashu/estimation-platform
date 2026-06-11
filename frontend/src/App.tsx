@@ -12,6 +12,7 @@ import SettingsPage from './modules/settings/SettingsPage';
 import NotificationsPage from './modules/notifications/NotificationsPage';
 import LogsPage from './modules/logs/LogsPage';
 import HealthPage from './modules/monitoring/HealthPage';
+import ParametricEstimationPage from './modules/parametric-estimation/ParametricEstimationPage';
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
       <Route element={<AppShell />}>
         <Route index element={<Dashboard />} />
         <Route path="estimate" element={<EstimationWizard />} />
+        <Route path="parametric-estimation" element={<ParametricEstimationPage />} />
         <Route path="history" element={<HistoricalData />} />
         <Route path="analysis" element={<AnalysisPage />} />
         <Route path="master">

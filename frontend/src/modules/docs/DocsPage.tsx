@@ -306,7 +306,7 @@ export default function DocsPage() {
               The complete lifecycle of an estimation — from creation through to accuracy reporting — follows this sequence:
             </p>
             <Steps items={[
-              { title: 'Create an Estimation', desc: 'Go to New Estimate (/estimate). Enter the task title and optional project/description, then select Complexity and Risk levels. The Live Preview panel on the right updates in real time.' },
+              { title: 'Create an Estimation', desc: 'Go to Storypoint Estimation (/estimate). Enter the task title and optional project/description, then select Complexity and Risk levels. The Live Preview panel on the right updates in real time.' },
               { title: 'Assign Competency', desc: 'Step 2 asks for the engineer competency level (Emerging / Competent / Expert). This determines the overhead percentage applied on top of the initial effort.' },
               { title: 'Review & Save', desc: 'Step 3 shows the full calculation chain (Complexity + Risk → SP → Initial Effort → Overhead → Revised Effort). Add notes if needed, then click Save Estimation.' },
               { title: 'Track in Dashboard & History', desc: 'The saved estimation appears in Recent Estimations (Dashboard) and the Historical Data table with status "open".' },

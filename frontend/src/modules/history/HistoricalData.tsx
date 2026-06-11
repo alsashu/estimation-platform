@@ -264,7 +264,7 @@ export default function HistoricalData() {
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" icon={<Download size={15} />}>Export CSV</Button>
           <Button variant="outline" size="sm" icon={<Upload size={15} />} onClick={() => setImportOpen(true)}>Import Excel</Button>
-          <Link to="/estimate"><Button size="sm" icon={<Plus size={15} />}>New Estimate</Button></Link>
+          <Link to="/estimate"><Button size="sm" icon={<Plus size={15} />}>Storypoint Estimation</Button></Link>
         </div>
       </div>
 
@@ -316,7 +316,7 @@ export default function HistoricalData() {
                 <tr><td colSpan={11}>
                   <EmptyState icon={<ClipboardList size={28} />} title="No estimations found"
                     message={search || complexity ? "Try adjusting your filters" : "Create your first estimation to get started"}
-                    action={<Link to="/estimate"><Button size="sm">New Estimate</Button></Link>}
+                    action={<Link to="/estimate"><Button size="sm">Storypoint Estimation</Button></Link>}
                   />
                 </td></tr>
               ) : estimations.map((e) => (

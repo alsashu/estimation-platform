@@ -12,8 +12,15 @@ const navGroups = [
   {
     label: 'Overview',
     items: [
-      { to: '/',          icon: LayoutDashboard, label: 'Dashboard' },
-      { to: '/estimate',  icon: Calculator,       label: 'New Estimate' },
+      { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+      // { to: '/estimate',  icon: Calculator,       label: 'New Estimate' },
+    ],
+  },
+  {
+    label: 'Estimation Methods',
+    items: [
+      { to: '/estimate',  icon: Calculator, label: 'Storypoint Estimation' },
+      { to: '/parametric-estimation', icon: LayoutDashboard, label: 'Parametric Estimation' },
     ],
   },
   {

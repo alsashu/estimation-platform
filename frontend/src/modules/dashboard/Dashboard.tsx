@@ -1,14 +1,15 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
-import { LayoutDashboard, Calculator, TrendingUp, Clock, Target, CheckCircle, AlertCircle, BarChart3 } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, Calculator, TrendingUp, Clock, Target, CheckCircle, AlertCircle, BarChart3, ChevronRight, Sigma } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell, CartesianGrid } from 'recharts';
 import { analysisApi, estimationsApi } from '../../services/api';
-import { StatCard, Card, Badge, Skeleton, Button, SPDot } from '../../components/ui';
+import { StatCard, Card, Badge, Skeleton, Button, SPDot, Modal } from '../../components/ui';
 import { fmt, accuracyBg, cn } from '../../utils/formatters';
 import { SP_COLORS, COMPLEXITY_COLORS, CHART_COLORS } from '../../config/theme';
 import type { Estimation } from '../../types';
 
-function PageHeader() {
+function PageHeader({ onNewEstimate }: { onNewEstimate: () => void }) {
   return (
     <div className="flex items-center justify-between mb-6">
       <div>
@@ -17,14 +18,77 @@ function PageHeader() {
         </h1>
         <p className="text-sm text-coolslate mt-0.5">Overview of estimation activity and performance</p>
       </div>
-      <Link to="/estimate">
-        <Button icon={<Calculator size={16} />}>New Estimate</Button>
-      </Link>
+      <Button icon={<Calculator size={16} />} onClick={onNewEstimate}>New Estimate</Button>
     </div>
   );
 }
 
+function EstimationMethodModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const navigate = useNavigate();
+
+  const handleSelect = (path: string) => {
+    onClose();
+    navigate(path);
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Choose Estimation Method" size="lg">
+      <div>
+        <p className="text-sm text-coolslate mb-6">Select how you'd like to estimate your project tasks</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+          {/* Storypoint Estimation */}
+          <button
+            onClick={() => handleSelect('/estimate')}
+            className="group text-left p-5 rounded-xl border-2 border-lgrayblue/40 dark:border-slate-600 hover:border-greenline hover:bg-greenline/5 dark:hover:bg-greenline/10 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-greenline/40"
+          >
+            <div className="w-12 h-12 rounded-xl bg-gradient-primary flex items-center justify-center mb-4 shadow-sm group-hover:scale-105 transition-transform duration-200">
+              <Calculator size={22} className="text-white" />
+            </div>
+            <div className="flex items-start justify-between mb-1">
+              <h3 className="font-display font-semibold text-carbon dark:text-white">Storypoint Estimation</h3>
+              <Badge variant="success">Available</Badge>
+            </div>
+            <p className="text-xs text-coolslate leading-relaxed">
+              Estimate effort using story points based on complexity, risk, and team competency levels.
+            </p>
+            <div className="flex items-center gap-1 mt-4 text-greenline text-xs font-semibold">
+              <span>Get started</span>
+              <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform duration-200" />
+            </div>
+          </button>
+
+          {/* Parametric Estimation */}
+          <button
+            onClick={() => handleSelect('/parametric-estimation')}
+            className="group text-left p-5 rounded-xl border-2 border-lgrayblue/40 dark:border-slate-600 hover:border-carbon/40 dark:hover:border-lgrayblue/60 hover:bg-carbon/3 dark:hover:bg-white/5 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-carbon/20"
+          >
+            <div className="relative w-12 h-12 rounded-xl bg-gradient-to-br from-carbon to-carbon/70 dark:from-slate-600 dark:to-slate-700 flex items-center justify-center mb-4 shadow-sm group-hover:scale-105 transition-transform duration-200">
+              <Sigma size={22} className="text-white" />
+              <span className="absolute -top-1.5 -right-1.5 bg-gold text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase leading-none">Soon</span>
+            </div>
+            <div className="flex items-start justify-between mb-1">
+              <h3 className="font-display font-semibold text-carbon dark:text-white">Parametric Estimation</h3>
+              <Badge variant="warning">Coming Soon</Badge>
+            </div>
+            <p className="text-xs text-coolslate leading-relaxed">
+              Parameter-based model using historical data and configurable factors for advanced project forecasting.
+            </p>
+            <div className="flex items-center gap-1 mt-4 text-coolslate text-xs font-semibold">
+              <span>Preview</span>
+              <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform duration-200" />
+            </div>
+          </button>
+
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export default function Dashboard() {
+  const [showModal, setShowModal] = useState(false);
+
   const { data: summary, isLoading: sumLoading } = useQuery({ queryKey: ['analysis-summary'], queryFn: () => analysisApi.getSummary(), retry: false });
   const { data: trend, isLoading: trendLoading } = useQuery({ queryKey: ['trend'], queryFn: () => analysisApi.getTrend({ days: 30 }), retry: false });
   const { data: complexityData } = useQuery({ queryKey: ['complexity-breakdown'], queryFn: () => analysisApi.getByComplexity(), retry: false });
@@ -41,7 +105,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <PageHeader />
+      <PageHeader onNewEstimate={() => setShowModal(true)} />
 
       {/* KPI Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -135,7 +199,9 @@ export default function Dashboard() {
             <div className="py-10 text-center">
               <Calculator size={24} className="text-coolslate mx-auto mb-2 opacity-40" />
               <p className="text-sm text-coolslate">No estimations yet</p>
-              <Link to="/estimate" className="mt-3 inline-block"><Button size="sm">Create your first estimate</Button></Link>
+              <button onClick={() => setShowModal(true)} className="mt-3 inline-block">
+                <Button size="sm">Create your first estimate</Button>
+              </button>
             </div>
           ) : (
             recentEstimations.map((e) => (
@@ -166,6 +232,8 @@ export default function Dashboard() {
           )}
         </div>
       </Card>
+
+      <EstimationMethodModal isOpen={showModal} onClose={() => setShowModal(false)} />
     </div>
   );
 }

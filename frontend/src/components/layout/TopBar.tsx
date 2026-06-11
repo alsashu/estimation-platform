@@ -12,7 +12,7 @@ import { fmt, cn } from '../../utils/formatters';
 import { Badge } from '../ui';
 
 const BREADCRUMB_MAP: Record<string, string> = {
-  '': 'Dashboard', 'estimate': 'New Estimate', 'history': 'Historical Data',
+  '': 'Dashboard', 'estimate': 'Storypoint Estimation', 'parametric-estimation': 'Parametric Estimation', 'history': 'Historical Data',
   'analysis': 'Analytics', 'master': 'Master Data', 'story-points': 'Story Points',
   'effort': 'Effort Estimates', 'competency': 'Competency Levels',
   'docs': 'Documentation', 'settings': 'Settings', 'notifications': 'Notifications',
