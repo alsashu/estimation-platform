@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Target, Plus, Edit2, Trash2 } from 'lucide-react';
 import { masterApi } from '../../services/api';
@@ -31,8 +32,8 @@ function SPModal({ sp, isOpen, onClose, onSave, loading }: {
 }) {
   const [storyPoints, setStoryPoints] = useState(String(sp?.story_points || ''));
   const [color, setColor] = useState(sp?.color_hex || '#1E3246');
-  const [complexity, setComplexity] = useState(sp?.complexity || 'Low');
-  const [risk, setRisk] = useState(sp?.risk || 'Low');
+  const [complexity, setComplexity] = useState<ComplexityLevel>((sp?.complexity as ComplexityLevel) || 'Low');
+  const [risk, setRisk] = useState<RiskLevel>((sp?.risk as RiskLevel) || 'Low');
 
   const isNew = !sp;
 
@@ -51,14 +52,14 @@ function SPModal({ sp, isOpen, onClose, onSave, loading }: {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-sm font-medium text-carbon dark:text-lgrayblue block mb-1">Complexity</label>
-                <select value={complexity} onChange={(e) => setComplexity(e.target.value)}
+                <select value={complexity} onChange={(e) => setComplexity(e.target.value as ComplexityLevel)}
                   className="w-full px-3 py-2.5 rounded-lg border border-lgrayblue dark:border-slate-600 bg-white dark:bg-carbon-800 text-sm text-carbon dark:text-white focus:outline-none focus:ring-2 focus:ring-carbon/20">
                   {COMPLEXITIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div>
                 <label className="text-sm font-medium text-carbon dark:text-lgrayblue block mb-1">Risk</label>
-                <select value={risk} onChange={(e) => setRisk(e.target.value)}
+                <select value={risk} onChange={(e) => setRisk(e.target.value as RiskLevel)}
                   className="w-full px-3 py-2.5 rounded-lg border border-lgrayblue dark:border-slate-600 bg-white dark:bg-carbon-800 text-sm text-carbon dark:text-white focus:outline-none focus:ring-2 focus:ring-carbon/20">
                   {RISKS.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
@@ -101,6 +102,7 @@ function SPModal({ sp, isOpen, onClose, onSave, loading }: {
 }
 
 export default function StoryPointsPage() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const { addToast } = useToastStore();
   const [editSP, setEditSP] = useState<StoryPointConfig | undefined>();
@@ -136,7 +138,18 @@ export default function StoryPointsPage() {
           <h1 className="text-2xl font-display font-bold text-carbon dark:text-white flex items-center gap-2"><Target size={22} /> Story Points</h1>
           <p className="text-sm text-coolslate mt-0.5">Manage Complexity × Risk → Story Point mappings</p>
         </div>
-        <Button icon={<Plus size={16} />} onClick={() => setShowAdd(true)}>Add Mapping</Button>
+        <div className="flex items-center gap-3">
+          <div className="flex gap-1 bg-lgrayblue/30 dark:bg-slate-700/40 rounded-lg p-1">
+            <button className="px-4 py-1.5 rounded-md text-xs font-medium transition-all bg-white dark:bg-carbon-700 text-carbon dark:text-white shadow-sm">
+              Story Points
+            </button>
+            <button onClick={() => navigate('/master/competency')}
+              className="px-4 py-1.5 rounded-md text-xs font-medium transition-all text-coolslate hover:text-carbon dark:hover:text-white">
+              Competency Levels
+            </button>
+          </div>
+          <Button icon={<Plus size={16} />} onClick={() => setShowAdd(true)}>Add Mapping</Button>
+        </div>
       </div>
 
       {/* Matrix view */}

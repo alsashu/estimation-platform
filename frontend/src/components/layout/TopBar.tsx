@@ -2,20 +2,25 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Bell, Sun, Moon, Search, ChevronRight, User, Settings, LogOut,
-  Wifi, WifiOff, CheckCheck,
+  Bell, Sun, Moon, ChevronRight, User, Settings, LogOut,
+  WifiOff, CheckCheck, Shield,
 } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 import { useOffline } from '../../hooks/useOffline';
 import { useNotificationStore } from '../../store';
+import { useAuthStore } from '../../store/authStore';
+import { authApi } from '../../services/api';
+import { ProjectSelector } from './ProjectSelector';
 import { fmt, cn } from '../../utils/formatters';
 import { Badge } from '../ui';
 
 const BREADCRUMB_MAP: Record<string, string> = {
-  '': 'Dashboard', 'estimate': 'Storypoint Estimation', 'parametric-estimation': 'Parametric Estimation', 'history': 'Historical Data',
-  'analysis': 'Analytics', 'master': 'Master Data', 'story-points': 'Story Points',
-  'effort': 'Effort Estimates', 'competency': 'Competency Levels',
+  '': 'Dashboard', 'estimate': 'Storypoint Estimation', 'parametric-estimation': 'Parametric Estimation',
+  'history': 'Historical Data', 'analysis': 'Analytics', 'master': 'Master Data',
+  'story-points': 'Story Points', 'effort': 'Effort Estimates', 'competency': 'Competency Levels',
   'docs': 'Documentation', 'settings': 'Settings', 'notifications': 'Notifications',
+  'users': 'User Management', 'projects': 'Projects', 'roles': 'Roles & Permissions',
+  'registrations': 'Registration Requests', 'logs': 'Log Monitor', 'monitoring': 'Health',
 };
 
 function useBreadcrumbs() {
@@ -34,6 +39,7 @@ export function TopBar() {
   const { isDark, toggleTheme } = useTheme();
   const { isOffline } = useOffline();
   const { notifications, unreadCount } = useNotificationStore();
+  const { user, clearAuth } = useAuthStore();
   const navigate = useNavigate();
   const crumbs = useBreadcrumbs();
   const [notifOpen, setNotifOpen] = useState(false);
@@ -50,12 +56,23 @@ export function TopBar() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const typeColors = {
+  const handleLogout = async () => {
+    try {
+      const { refreshToken } = useAuthStore.getState();
+      await authApi.logout(refreshToken ?? undefined);
+    } catch {}
+    clearAuth();
+    navigate('/login');
+  };
+
+  const typeColors: Record<string, string> = {
     info: 'bg-carbon/10 text-carbon dark:text-lgrayblue',
     success: 'bg-greenline/10 text-greenline',
     warning: 'bg-gold/10 text-gold',
     error: 'bg-vibrant/10 text-vibrant',
   };
+
+  const pendingApprovals = notifications.filter(n => n.category === 'approval' && !n.read).length;
 
   return (
     <header className="h-14 bg-white dark:bg-carbon-800 border-b border-lgrayblue/30 dark:border-slate-700 flex items-center px-5 gap-4 flex-shrink-0 z-10">
@@ -64,42 +81,43 @@ export function TopBar() {
         {crumbs.map((c, i) => (
           <span key={c.to} className="flex items-center gap-1 min-w-0">
             {i > 0 && <ChevronRight size={13} className="text-coolslate flex-shrink-0" />}
-            <button
-              onClick={() => navigate(c.to)}
-              className={cn(
-                'truncate transition-colors',
-                i === crumbs.length - 1 ? 'text-carbon dark:text-white font-semibold' : 'text-coolslate hover:text-carbon dark:hover:text-white'
-              )}
-            >
+            <button onClick={() => navigate(c.to)}
+              className={cn('truncate transition-colors', i === crumbs.length - 1 ? 'text-carbon dark:text-white font-semibold' : 'text-coolslate hover:text-carbon dark:hover:text-white')}>
               {c.label}
             </button>
           </span>
         ))}
       </nav>
 
+      {/* Project Selector */}
+      <ProjectSelector />
+
       {/* Right actions */}
       <div className="flex items-center gap-2">
-        {/* Offline indicator */}
         {isOffline && (
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gold/10 text-gold rounded-full text-xs font-medium">
             <WifiOff size={12} /><span>Offline</span>
           </div>
         )}
 
+        {/* Pending approvals badge */}
+        {pendingApprovals > 0 && (
+          <button onClick={() => navigate('/registrations')}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-gold/10 border border-gold/30 text-gold rounded-full text-xs font-medium animate-pulse hover:bg-gold/20 transition-colors">
+            <span>{pendingApprovals} pending approval{pendingApprovals > 1 ? 's' : ''}</span>
+          </button>
+        )}
+
         {/* Theme toggle */}
-        <button
-          onClick={toggleTheme}
-          className="p-2 rounded-lg text-coolslate hover:text-carbon dark:hover:text-white hover:bg-lgrayblue/40 dark:hover:bg-slate-700 transition-all"
-        >
+        <button onClick={toggleTheme}
+          className="p-2 rounded-lg text-coolslate hover:text-carbon dark:hover:text-white hover:bg-lgrayblue/40 dark:hover:bg-slate-700 transition-all">
           {isDark ? <Sun size={18} /> : <Moon size={18} />}
         </button>
 
         {/* Notifications */}
         <div className="relative" ref={notifRef}>
-          <button
-            onClick={() => setNotifOpen(o => !o)}
-            className="relative p-2 rounded-lg text-coolslate hover:text-carbon dark:hover:text-white hover:bg-lgrayblue/40 dark:hover:bg-slate-700 transition-all"
-          >
+          <button onClick={() => setNotifOpen(o => !o)}
+            className="relative p-2 rounded-lg text-coolslate hover:text-carbon dark:hover:text-white hover:bg-lgrayblue/40 dark:hover:bg-slate-700 transition-all">
             <Bell size={18} />
             {unreadCount > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-vibrant text-white text-[9px] font-bold rounded-full flex items-center justify-center">
@@ -110,8 +128,7 @@ export function TopBar() {
           <AnimatePresence>
             {notifOpen && (
               <motion.div initial={{ opacity: 0, y: 8, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                className="absolute right-0 top-12 w-80 bg-white dark:bg-carbon-700 rounded-xl shadow-modal border border-lgrayblue/30 dark:border-slate-600 overflow-hidden z-50"
-              >
+                className="absolute right-0 top-12 w-80 bg-white dark:bg-carbon-700 rounded-xl shadow-modal border border-lgrayblue/30 dark:border-slate-600 overflow-hidden z-50">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-lgrayblue/30 dark:border-slate-700">
                   <span className="text-sm font-semibold text-carbon dark:text-white">Notifications</span>
                   {unreadCount > 0 && <Badge variant="danger">{unreadCount} new</Badge>}
@@ -123,7 +140,9 @@ export function TopBar() {
                       <p className="text-sm text-coolslate">All caught up!</p>
                     </div>
                   ) : notifications.slice(0, 10).map((n) => (
-                    <div key={n.id} className={cn('px-4 py-3 border-b border-lgrayblue/20 dark:border-slate-700/50 last:border-0', !n.read && 'bg-lgrayblue/20 dark:bg-slate-700/30')}>
+                    <div key={n.id}
+                      className={cn('px-4 py-3 border-b border-lgrayblue/20 dark:border-slate-700/50 last:border-0 cursor-pointer hover:bg-lgrayblue/10 dark:hover:bg-slate-700/30', !n.read && 'bg-lgrayblue/20 dark:bg-slate-700/30')}
+                      onClick={() => { if ((n as unknown as { action_url?: string }).action_url) navigate((n as unknown as { action_url: string }).action_url); setNotifOpen(false); }}>
                       <div className="flex items-start gap-2.5">
                         <span className={cn('w-2 h-2 rounded-full mt-1.5 flex-shrink-0', typeColors[n.type])} />
                         <div className="min-w-0">
@@ -148,27 +167,45 @@ export function TopBar() {
         {/* Profile */}
         <div className="relative" ref={profileRef}>
           <button onClick={() => setProfileOpen(o => !o)}
-            className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg hover:bg-lgrayblue/40 dark:hover:bg-slate-700 transition-all"
-          >
+            className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg hover:bg-lgrayblue/40 dark:hover:bg-slate-700 transition-all">
             <div className="w-7 h-7 rounded-lg bg-gradient-primary flex items-center justify-center">
               <User size={14} className="text-white" />
             </div>
-            <span className="text-sm font-medium text-carbon dark:text-white hidden sm:block">Admin</span>
+            <div className="hidden sm:block text-left">
+              <p className="text-xs font-semibold text-carbon dark:text-white leading-tight">
+                {user ? `${user.firstName} ${user.lastName}` : 'User'}
+              </p>
+              {user?.roles?.[0] && (
+                <p className="text-[10px] text-coolslate leading-tight">{user.roles[0]}</p>
+              )}
+            </div>
           </button>
           <AnimatePresence>
             {profileOpen && (
               <motion.div initial={{ opacity: 0, y: 8, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                className="absolute right-0 top-12 w-48 bg-white dark:bg-carbon-700 rounded-xl shadow-modal border border-lgrayblue/30 dark:border-slate-600 overflow-hidden z-50"
-              >
-                {[{ icon: User, label: 'Profile', to: '/settings' }, { icon: Settings, label: 'Settings', to: '/settings' }].map(({ icon: Icon, label, to }) => (
+                className="absolute right-0 top-12 w-52 bg-white dark:bg-carbon-700 rounded-xl shadow-modal border border-lgrayblue/30 dark:border-slate-600 overflow-hidden z-50">
+                <div className="px-4 py-3 border-b border-lgrayblue/20 dark:border-slate-700/50">
+                  <p className="text-sm font-semibold text-carbon dark:text-white">{user?.firstName} {user?.lastName}</p>
+                  <p className="text-xs text-coolslate">{user?.email}</p>
+                  {user?.roles?.[0] && (
+                    <div className="flex items-center gap-1 mt-1.5">
+                      <Shield size={10} className="text-coolslate" />
+                      <span className="text-[10px] text-coolslate">{user.roles[0]}</span>
+                    </div>
+                  )}
+                </div>
+                {[
+                  { icon: User, label: 'Profile', to: '/settings' },
+                  { icon: Settings, label: 'Settings', to: '/settings' },
+                ].map(({ icon: Icon, label, to }) => (
                   <button key={label} onClick={() => { navigate(to); setProfileOpen(false); }}
-                    className="flex items-center gap-3 w-full px-4 py-2.5 text-sm text-carbon dark:text-lgrayblue hover:bg-lgrayblue/30 dark:hover:bg-slate-700 transition-colors"
-                  >
+                    className="flex items-center gap-3 w-full px-4 py-2.5 text-sm text-carbon dark:text-lgrayblue hover:bg-lgrayblue/30 dark:hover:bg-slate-700 transition-colors">
                     <Icon size={15} />{label}
                   </button>
                 ))}
                 <div className="border-t border-lgrayblue/30 dark:border-slate-700">
-                  <button className="flex items-center gap-3 w-full px-4 py-2.5 text-sm text-vibrant hover:bg-vibrant/5 transition-colors">
+                  <button onClick={handleLogout}
+                    className="flex items-center gap-3 w-full px-4 py-2.5 text-sm text-vibrant hover:bg-vibrant/5 transition-colors">
                     <LogOut size={15} />Sign out
                   </button>
                 </div>

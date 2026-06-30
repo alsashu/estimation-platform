@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, CheckCircle, AlertCircle, Info, AlertTriangle, Loader2, Search, ChevronUp, ChevronDown } from 'lucide-react';
+import { X, CheckCircle, AlertCircle, Info, AlertTriangle, Loader2, Search, ChevronUp, ChevronDown, Check } from 'lucide-react';
 import { cn } from '../../utils/formatters';
 
 // ─── Button ───────────────────────────────────────────────────────────────────
@@ -398,4 +398,139 @@ export function ConfirmDialog({ isOpen, onClose, onConfirm, title, message, conf
 // ─── SP Color Dot ─────────────────────────────────────────────────────────────
 export function SPDot({ color, size = 10 }: { color: string; size?: number }) {
   return <span className="rounded-full inline-block flex-shrink-0" style={{ width: size, height: size, background: color }} />;
+}
+
+// ─── Multi-Select ─────────────────────────────────────────────────────────────
+import { useRef } from 'react';
+
+export interface MultiSelectOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+interface MultiSelectProps {
+  options: MultiSelectOption[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+  placeholder?: string;
+  emptyMessage?: string;
+  maxChips?: number;
+}
+
+export function MultiSelect({
+  options, selected, onChange,
+  placeholder = 'Select…', emptyMessage = 'No options found', maxChips = 3,
+}: MultiSelectProps) {
+  const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filtered = query
+    ? options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()))
+    : options;
+
+  const toggle = (id: string) =>
+    onChange(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id]);
+
+  const removeChip = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    onChange(selected.filter(x => x !== id));
+  };
+
+  const selectedOptions = options.filter(o => selected.includes(o.id));
+  const visibleChips = selectedOptions.slice(0, maxChips);
+  const overflowCount = selectedOptions.length - maxChips;
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div
+        onClick={() => setOpen(o => !o)}
+        className="min-h-[38px] w-full flex flex-wrap items-center gap-1.5 px-3 py-2 rounded-lg border border-lgrayblue/40 dark:border-slate-600 bg-white dark:bg-carbon-700 cursor-pointer hover:border-carbon/40 dark:hover:border-slate-500 transition-colors"
+        role="combobox" aria-expanded={open}
+      >
+        {visibleChips.map(opt => (
+          <span key={opt.id} className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md bg-carbon/8 dark:bg-slate-600 text-carbon dark:text-white border border-carbon/15 dark:border-slate-500">
+            {opt.label}
+            <button type="button" onClick={e => removeChip(opt.id, e)} className="hover:text-vibrant transition-colors">
+              <X size={10} />
+            </button>
+          </span>
+        ))}
+        {overflowCount > 0 && (
+          <span className="text-xs text-coolslate font-medium">+{overflowCount} more</span>
+        )}
+        {selectedOptions.length === 0 && (
+          <span className="text-sm text-coolslate/70">{placeholder}</span>
+        )}
+        <ChevronDown size={14} className={`ml-auto text-coolslate flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </div>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-white dark:bg-carbon-700 rounded-xl border border-lgrayblue/30 dark:border-slate-600 shadow-modal overflow-hidden">
+          <div className="p-2 border-b border-lgrayblue/20 dark:border-slate-700">
+            <div className="flex items-center gap-2 px-2 py-1.5 bg-lgrayblue/20 dark:bg-slate-800 rounded-lg">
+              <Search size={13} className="text-coolslate flex-shrink-0" />
+              <input
+                autoFocus
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder="Search…"
+                onClick={e => e.stopPropagation()}
+                className="flex-1 text-sm bg-transparent text-carbon dark:text-white placeholder:text-coolslate/70 outline-none"
+              />
+              {query && (
+                <button type="button" onClick={e => { e.stopPropagation(); setQuery(''); }} className="text-coolslate hover:text-carbon dark:hover:text-white">
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="max-h-52 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <p className="text-xs text-coolslate text-center py-4">{emptyMessage}</p>
+            ) : (
+              filtered.map(opt => {
+                const isSelected = selected.includes(opt.id);
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={e => { e.stopPropagation(); toggle(opt.id); }}
+                    className="flex items-center gap-3 w-full px-3 py-2.5 text-left hover:bg-lgrayblue/20 dark:hover:bg-slate-600/50 transition-colors"
+                  >
+                    <span className={`flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-carbon dark:bg-white border-carbon dark:border-white' : 'border-lgrayblue dark:border-slate-500'}`}>
+                      {isSelected && <Check size={10} className="text-white dark:text-carbon" />}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm text-carbon dark:text-white truncate">{opt.label}</p>
+                      {opt.description && <p className="text-[11px] text-coolslate truncate">{opt.description}</p>}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+          {selected.length > 0 && (
+            <div className="px-3 py-2 border-t border-lgrayblue/20 dark:border-slate-700 flex items-center justify-between">
+              <span className="text-xs text-coolslate">{selected.length} selected</span>
+              <button type="button" onClick={e => { e.stopPropagation(); onChange([]); }}
+                className="text-xs text-vibrant hover:underline">Clear all</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }

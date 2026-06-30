@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { BarChart3, TrendingUp, AlertCircle, CheckCircle, Download } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ScatterChart, Scatter, ReferenceLine, Cell } from 'recharts';
 import { analysisApi } from '../../services/api';
+import { useProjectStore } from '../../store/projectStore';
 import { StatCard, Card, Badge, Skeleton, Button, EmptyState } from '../../components/ui';
 import { fmt, accuracyBg, cn } from '../../utils/formatters';
 import { COMPLEXITY_COLORS, SP_COLORS } from '../../config/theme';
@@ -16,14 +17,18 @@ const PERIOD_OPTIONS = [
 
 export default function AnalysisPage() {
   const [period, setPeriod] = useState(90);
+  const { selectedProjectId } = useProjectStore();
 
   const dateFrom = new Date(Date.now() - period * 24 * 60 * 60 * 1000).toISOString();
-  const params = { from: dateFrom };
+  const params = {
+    from: dateFrom,
+    ...(selectedProjectId ? { projectId: selectedProjectId } : {}),
+  };
 
-  const { data: summary, isLoading: sumLoading } = useQuery({ queryKey: ['summary', period], queryFn: () => analysisApi.getSummary(params), retry: false });
-  const { data: complexity } = useQuery({ queryKey: ['complexity', period], queryFn: () => analysisApi.getByComplexity(params), retry: false });
-  const { data: spBands } = useQuery({ queryKey: ['sp-bands', period], queryFn: () => analysisApi.getSPBands(params), retry: false });
-  const { data: scatter } = useQuery({ queryKey: ['scatter', period], queryFn: () => analysisApi.getScatter(params), retry: false });
+  const { data: summary, isLoading: sumLoading } = useQuery({ queryKey: ['summary', period, selectedProjectId], queryFn: () => analysisApi.getSummary(params), retry: false });
+  const { data: complexity } = useQuery({ queryKey: ['complexity', period, selectedProjectId], queryFn: () => analysisApi.getByComplexity(params), retry: false });
+  const { data: spBands } = useQuery({ queryKey: ['sp-bands', period, selectedProjectId], queryFn: () => analysisApi.getSPBands(params), retry: false });
+  const { data: scatter } = useQuery({ queryKey: ['scatter', period, selectedProjectId], queryFn: () => analysisApi.getScatter(params), retry: false });
 
   const biasColor = summary?.bias === 'accurate' ? 'success' : 'warning';
 

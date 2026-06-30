@@ -125,6 +125,11 @@ export interface Notification {
   message: string;
   read: boolean;
   created_at: string;
+  // Enterprise fields
+  user_id?: string;
+  category?: 'general' | 'approval' | 'system' | 'security';
+  action_url?: string;
+  priority?: 'normal' | 'high' | 'urgent';
 }
 
 export interface ApiResponse<T> {

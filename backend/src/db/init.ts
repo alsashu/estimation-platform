@@ -1,5 +1,7 @@
 import { pool } from '../config/database';
 import { seedData } from './seed';
+import { runEnterpriseMigration } from './migrate';
+import { seedEnterpriseData } from './seed.enterprise';
 
 const schema = `
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -183,6 +185,9 @@ export async function initDatabase(): Promise<void> {
     await client.query(schema);
     console.log('✅ Schema created/verified.');
 
+    // Enterprise migration (idempotent)
+    await runEnterpriseMigration(client);
+
     const { rows } = await client.query(`SELECT value FROM app_settings WHERE key = 'seeded'`);
     if (rows.length === 0) {
       console.log('🌱 Seeding master data...');
@@ -192,6 +197,10 @@ export async function initDatabase(): Promise<void> {
     } else {
       console.log('ℹ️  Database already seeded.');
     }
+
+    // Enterprise seed (idempotent — uses ON CONFLICT DO NOTHING)
+    await seedEnterpriseData(client);
+
   } finally {
     client.release();
   }

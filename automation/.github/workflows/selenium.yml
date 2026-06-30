@@ -1,0 +1,120 @@
+name: Selenium E2E Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'automation/**'
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: '0 2 * * *'  # nightly at 2 AM UTC
+  workflow_dispatch:
+    inputs:
+      browser:
+        description: 'Browser to run tests on'
+        required: false
+        default: 'chrome'
+        type: choice
+        options: [chrome, firefox, edge]
+      suite:
+        description: 'Test suite to run (empty = all)'
+        required: false
+        default: ''
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  selenium-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    services: {}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: ['${{ github.event.inputs.browser || 'chrome' }}']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: automation/package-lock.json
+
+      - name: Install dependencies
+        working-directory: automation
+        run: npm ci
+
+      - name: Set up Chrome
+        if: matrix.browser == 'chrome'
+        uses: browser-actions/setup-chrome@latest
+
+      - name: Set up Firefox
+        if: matrix.browser == 'firefox'
+        uses: browser-actions/setup-firefox@latest
+
+      - name: Run Selenium tests
+        working-directory: automation
+        env:
+          BASE_URL: ${{ secrets.BASE_URL || 'http://localhost:5173' }}
+          API_URL: ${{ secrets.API_URL || 'http://localhost:4000' }}
+          BROWSER: ${{ matrix.browser }}
+          HEADLESS: 'true'
+          GSA_EMAIL: ${{ secrets.GSA_EMAIL }}
+          GSA_PASSWORD: ${{ secrets.GSA_PASSWORD }}
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          USER_EMAIL: ${{ secrets.USER_EMAIL }}
+          USER_PASSWORD: ${{ secrets.USER_PASSWORD }}
+          INACTIVE_EMAIL: ${{ secrets.INACTIVE_EMAIL }}
+          INACTIVE_PASSWORD: ${{ secrets.INACTIVE_PASSWORD }}
+        run: |
+          if [ -n "${{ github.event.inputs.suite }}" ]; then
+            npm run test -- --spec "tests/${{ github.event.inputs.suite }}/**/*.test.js"
+          else
+            npm run test:parallel:ci
+          fi
+
+      - name: Generate Allure report
+        if: always()
+        working-directory: automation
+        run: npm run report:generate || true
+
+      - name: Upload Allure results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-${{ matrix.browser }}
+          path: automation/allure-results/
+          retention-days: 7
+
+      - name: Upload Allure report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report-${{ matrix.browser }}
+          path: automation/reports/
+          retention-days: 30
+
+      - name: Upload screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ matrix.browser }}
+          path: automation/screenshots/
+          retention-days: 7
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.browser }}
+          path: automation/logs/
+          retention-days: 7

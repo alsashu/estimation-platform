@@ -148,8 +148,18 @@ export async function getRiskDefs(req: Request, res: Response): Promise<void> {
 // ─── Notifications ────────────────────────────────────────────────────────────
 
 export async function getNotifications(req: Request, res: Response): Promise<void> {
-  const data = await query(`SELECT * FROM notifications ORDER BY created_at DESC LIMIT 50`);
-  const unread = await query<{ count: string }>(`SELECT COUNT(*) as count FROM notifications WHERE read = false`);
+  const userId = req.user?.userId ?? null;
+  // Return user-scoped notifications + global (no user_id) notifications
+  const data = await query(
+    `SELECT * FROM notifications
+     WHERE (user_id = $1 OR user_id IS NULL)
+     ORDER BY priority DESC, created_at DESC LIMIT 50`,
+    [userId]
+  );
+  const unread = await query<{ count: string }>(
+    `SELECT COUNT(*) as count FROM notifications WHERE read = false AND (user_id = $1 OR user_id IS NULL)`,
+    [userId]
+  );
   res.json({ success: true, data, unread_count: parseInt(unread[0]?.count ?? '0') });
 }
 
@@ -159,6 +169,7 @@ export async function markNotificationRead(req: Request, res: Response): Promise
 }
 
 export async function markAllNotificationsRead(req: Request, res: Response): Promise<void> {
-  await query(`UPDATE notifications SET read=true`);
+  const userId = req.user?.userId ?? null;
+  await query(`UPDATE notifications SET read=true WHERE (user_id=$1 OR user_id IS NULL)`, [userId]);
   res.json({ success: true, message: 'All marked as read' });
 }

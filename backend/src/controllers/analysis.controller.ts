@@ -1,13 +1,40 @@
 import { Request, Response } from 'express';
 import { query } from '../config/database';
 
+function addProjectFilter(req: Request, where: string, params: unknown[], i: number): [string, unknown[], number] {
+  const selectedProjectId = req.query.projectId as string | undefined;
+
+  if (selectedProjectId) {
+    // Validate user has access to the requested project
+    if (req.user && req.user.projectIds !== '*') {
+      const ids = req.user.projectIds as string[];
+      if (!ids.includes(selectedProjectId)) {
+        where += ` AND 1=0`; // no access
+        return [where, params, i];
+      }
+    }
+    where += ` AND project_id = $${i++}`;
+    params.push(selectedProjectId);
+  } else if (req.user && req.user.projectIds !== '*') {
+    const ids = req.user.projectIds as string[];
+    if (ids.length > 0) {
+      where += ` AND project_id = ANY($${i++}::uuid[])`;
+      params.push(ids);
+    } else {
+      where += ` AND 1=0`;
+    }
+  }
+  return [where, params, i];
+}
+
 export async function getSummary(req: Request, res: Response): Promise<void> {
   const { from, to, complexity, risk, competency } = req.query;
 
   let where = `WHERE status = 'completed' AND actual_hours IS NOT NULL`;
-  const params: unknown[] = [];
+  let params: unknown[] = [];
   let i = 1;
 
+  [where, params, i] = addProjectFilter(req, where, params, i);
   if (from)       { where += ` AND created_at >= $${i++}`; params.push(from); }
   if (to)         { where += ` AND created_at <= $${i++}`; params.push(to); }
   if (complexity) { where += ` AND complexity = $${i++}`; params.push(complexity); }
@@ -31,7 +58,12 @@ export async function getSummary(req: Request, res: Response): Promise<void> {
     params
   );
 
-  const totalAll = await query<{ count: string }>(`SELECT COUNT(*) as count FROM estimations`);
+  // Total estimation count (project-scoped)
+  let totalWhere = 'WHERE 1=1';
+  let totalParams: unknown[] = [];
+  let ti = 1;
+  [totalWhere, totalParams, ti] = addProjectFilter(req, totalWhere, totalParams, ti);
+  const totalAll = await query<{ count: string }>(`SELECT COUNT(*) as count FROM estimations ${totalWhere}`, totalParams);
 
   res.json({
     success: true,
@@ -50,9 +82,10 @@ export async function getSummary(req: Request, res: Response): Promise<void> {
 
 export async function getByComplexity(req: Request, res: Response): Promise<void> {
   const { from, to } = req.query;
-  const params: unknown[] = [];
+  let params: unknown[] = [];
   let where = `WHERE status = 'completed' AND actual_hours IS NOT NULL`;
   let i = 1;
+  [where, params, i] = addProjectFilter(req, where, params, i);
   if (from) { where += ` AND created_at >= $${i++}`; params.push(from); }
   if (to)   { where += ` AND created_at <= $${i++}`; params.push(to); }
 
@@ -75,9 +108,10 @@ export async function getByComplexity(req: Request, res: Response): Promise<void
 
 export async function getSPBandSummary(req: Request, res: Response): Promise<void> {
   const { from, to } = req.query;
-  const params: unknown[] = [];
+  let params: unknown[] = [];
   let where = `WHERE status = 'completed' AND actual_hours IS NOT NULL`;
   let i = 1;
+  [where, params, i] = addProjectFilter(req, where, params, i);
   if (from) { where += ` AND created_at >= $${i++}`; params.push(from); }
   if (to)   { where += ` AND created_at <= $${i++}`; params.push(to); }
 
@@ -97,9 +131,10 @@ export async function getSPBandSummary(req: Request, res: Response): Promise<voi
 
 export async function getScatterData(req: Request, res: Response): Promise<void> {
   const { from, to } = req.query;
-  const params: unknown[] = [];
+  let params: unknown[] = [];
   let where = `WHERE status = 'completed' AND actual_hours IS NOT NULL`;
   let i = 1;
+  [where, params, i] = addProjectFilter(req, where, params, i);
   if (from) { where += ` AND created_at >= $${i++}`; params.push(from); }
   if (to)   { where += ` AND created_at <= $${i++}`; params.push(to); }
 
@@ -114,15 +149,21 @@ export async function getScatterData(req: Request, res: Response): Promise<void>
 
 export async function getTrend(req: Request, res: Response): Promise<void> {
   const { days = 30 } = req.query;
+  let params: unknown[] = [];
+  let where = `WHERE COALESCE(completed_at, created_at) >= NOW() - INTERVAL '${parseInt(String(days))} days'`;
+  let i = 1;
+  [where, params, i] = addProjectFilter(req, where, params, i);
+
   const data = await query(
     `SELECT DATE_TRUNC('day', COALESCE(completed_at, created_at)) as date,
             COUNT(*) as total,
             COUNT(*) FILTER (WHERE status='completed') as completed,
             COALESCE(AVG(accuracy_percent) FILTER (WHERE status='completed'), 0) as avg_accuracy
      FROM estimations
-     WHERE COALESCE(completed_at, created_at) >= NOW() - INTERVAL '${parseInt(String(days))} days'
+     ${where}
      GROUP BY DATE_TRUNC('day', COALESCE(completed_at, created_at))
-     ORDER BY date`
+     ORDER BY date`,
+    params
   );
   res.json({ success: true, data });
 }

@@ -192,7 +192,7 @@ function DefinitionTable({ data, type }: { data: (ComplexityDefinition | RiskDef
         {data.map((d) => (
           <div key={d.level} className="flex gap-3 p-3 rounded-lg bg-lgrayblue/10 dark:bg-carbon-800/30">
             <span className="inline-flex items-center justify-center w-20 flex-shrink-0 text-xs font-bold px-2 py-1 rounded-lg text-white" style={{ background: colors[d.level] || '#788291' }}>{d.level}</span>
-            <p className="text-sm text-carbon dark:text-lgrayblue">{(d as Record<string, unknown>)[active] as string || '—'}</p>
+            <p className="text-sm text-carbon dark:text-lgrayblue">{(d as unknown as Record<string, string>)[active] || '—'}</p>
           </div>
         ))}
       </div>

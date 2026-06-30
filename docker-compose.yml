@@ -19,6 +19,13 @@ services:
       NODE_ENV: development
       DATABASE_URL: postgresql://estimation_user:estimation_pass@postgres:5432/estimation_db
       PORT: 4000
+      JWT_SECRET: change-me-in-production-super-secret-jwt-key
+      JWT_REFRESH_SECRET: change-me-in-production-super-secret-refresh-key
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      PASSWORD_HISTORY_COUNT: 5
+      MAX_FAILED_LOGINS: 5
+      LOCKOUT_DURATION_MINUTES: 30
     ports:
       - "4000:4000"
     depends_on:

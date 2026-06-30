@@ -1,0 +1,42 @@
+[
+  {
+    "title": "User Auth Module",
+    "description": "Implement OAuth2 login flow",
+    "complexity": "High",
+    "storyPoints": 13,
+    "effortHours": 40,
+    "status": "Completed"
+  },
+  {
+    "title": "Dashboard Charts",
+    "description": "Build KPI dashboard with Chart.js",
+    "complexity": "Medium",
+    "storyPoints": 8,
+    "effortHours": 24,
+    "status": "In Progress"
+  },
+  {
+    "title": "User Profile Page",
+    "description": "Basic profile view and edit",
+    "complexity": "Low",
+    "storyPoints": 3,
+    "effortHours": 8,
+    "status": "Completed"
+  },
+  {
+    "title": "PDF Export",
+    "description": "Export estimation results to PDF",
+    "complexity": "Medium",
+    "storyPoints": 5,
+    "effortHours": 16,
+    "status": "Planned"
+  },
+  {
+    "title": "Parametric Model v2",
+    "description": "Enhanced function point analysis",
+    "complexity": "High",
+    "storyPoints": 21,
+    "effortHours": 64,
+    "status": "Planned"
+  }
+]

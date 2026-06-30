@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Calculator, ChevronRight, ChevronLeft, Zap, Info } from 'lucide-react';
 import { estimationsApi, masterApi } from '../../services/api';
+import { useProjectStore } from '../../store/projectStore';
 import { Button, Card, StepIndicator, Modal, SPDot } from '../../components/ui';
 import { useToastStore } from '../../store';
 import { fmt, cn } from '../../utils/formatters';
@@ -101,11 +102,20 @@ function LivePreview({ calc, complexity, risk, competency }: { calc?: Calculatio
 export default function EstimationWizard() {
   const navigate = useNavigate();
   const { addToast } = useToastStore();
+  const { selectedProjectId, projects } = useProjectStore();
   const [step, setStep] = useState(0);
   const [showDocModal, setShowDocModal] = useState(false);
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     defaultValues: { title: '', project_name: '', description: '', notes: '', complexity: '', risk: '', competency: '' },
   });
+
+  // Auto-populate project name from selected project
+  useEffect(() => {
+    if (selectedProjectId) {
+      const proj = projects.find(p => p.id === selectedProjectId);
+      if (proj) setValue('project_name', proj.name);
+    }
+  }, [selectedProjectId, projects, setValue]);
 
   const complexity = watch('complexity');
   const risk = watch('risk');
@@ -132,7 +142,13 @@ export default function EstimationWizard() {
 
   const onSubmit = (data: FormData) => {
     if (!data.complexity || !data.risk || !data.competency) return;
-    mutation.mutate({ ...data, complexity: data.complexity, risk: data.risk, competency: data.competency });
+    mutation.mutate({
+      ...data,
+      complexity: data.complexity,
+      risk: data.risk,
+      competency: data.competency,
+      project_id: selectedProjectId ?? undefined,
+    });
   };
 
   const canNext0 = !!complexity && !!risk;

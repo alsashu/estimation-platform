@@ -2,6 +2,8 @@ import { useState, useRef } from 'react';
 import { Download, UploadCloud, FileSpreadsheet, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { Modal, Button } from '../../components/ui';
 import { estimationsApi } from '../../services/api';
+import { useConnectionStore } from '../../store';
+import { useProjectStore } from '../../store/projectStore';
 import { cn } from '../../utils/formatters';
 
 const COMPLEXITY_OPTIONS = ['Low', 'Medium', 'High', 'Very High', 'Unmanageable'] as const;
@@ -35,17 +37,21 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  projectId?: string | null;
 }
 
 type Phase = 'upload' | 'preview' | 'importing' | 'done';
 
-export function ImportModal({ isOpen, onClose, onSuccess }: Props) {
+export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
   const [phase, setPhase]       = useState<Phase>('upload');
   const [rows, setRows]         = useState<ParsedRow[]>([]);
   const [fileName, setFileName] = useState('');
   const [result, setResult]     = useState<ImportResult | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const { projects } = useProjectStore();
+  const activeProject = projectId ? projects.find(p => p.id === projectId) : null;
 
   const reset = () => { setPhase('upload'); setRows([]); setFileName(''); setResult(null); };
   const handleClose = () => { reset(); onClose(); };
@@ -153,12 +159,20 @@ export function ImportModal({ isOpen, onClose, onSuccess }: Props) {
   const handleImport = async () => {
     const valid = rows.filter(r => r.valid);
     if (!valid.length) return;
+
+    if (!useConnectionStore.getState().isOnline) {
+      setResult({ created: 0, errors: [{ row: 0, error: 'Import is not available in offline mode. Go to Settings → Connection and switch back to Online, then try again.' }] });
+      setPhase('done');
+      return;
+    }
+
     setPhase('importing');
     try {
       const res = await estimationsApi.batchImport(
         valid.map(r => ({
           title:        r.title,
           project_name: r.project_name  || undefined,
+          project_id:   projectId       || undefined,
           description:  r.description   || undefined,
           complexity:   r.complexity,
           risk:         r.risk,
@@ -166,7 +180,7 @@ export function ImportModal({ isOpen, onClose, onSuccess }: Props) {
           notes:        r.notes         || undefined,
         }))
       );
-      setResult(res);
+      setResult({ created: res.created ?? 0, errors: res.errors ?? [] });
       setPhase('done');
       if (res.created > 0) onSuccess();
     } catch (e) {
@@ -209,6 +223,20 @@ export function ImportModal({ isOpen, onClose, onSuccess }: Props) {
             <Button variant="outline" size="sm" onClick={downloadTemplate} className="flex-shrink-0">
               <Download size={13} /> Download Template
             </Button>
+          </div>
+
+          {/* Project context */}
+          <div className={cn(
+            'flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs',
+            activeProject
+              ? 'bg-carbon/5 dark:bg-slate-800/40 border-carbon/15 dark:border-slate-600 text-carbon dark:text-white'
+              : 'bg-lgrayblue/10 dark:bg-slate-800/20 border-lgrayblue/20 dark:border-slate-700 text-coolslate'
+          )}>
+            <FileSpreadsheet size={13} className="flex-shrink-0" />
+            {activeProject
+              ? <span>Records will be imported into <span className="font-semibold">{activeProject.name}</span></span>
+              : <span>No project selected — records will not be associated with any project. Select a project from the top navigation before importing.</span>
+            }
           </div>
 
           {/* Drop zone */}
@@ -366,7 +394,7 @@ export function ImportModal({ isOpen, onClose, onSuccess }: Props) {
               </div>
             </div>
           )}
-          {result.errors.length > 0 && (
+          {(result.errors ?? []).length > 0 && (
             <div className="border border-vibrant/20 rounded-xl overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-2.5 bg-vibrant/5 border-b border-vibrant/10">
                 <AlertCircle size={13} className="text-vibrant" />
@@ -375,7 +403,7 @@ export function ImportModal({ isOpen, onClose, onSuccess }: Props) {
                 </p>
               </div>
               <div className="max-h-36 overflow-y-auto divide-y divide-vibrant/10">
-                {result.errors.map(({ row, error }) => (
+                {(result.errors ?? []).map(({ row, error }) => (
                   <div key={`${row}-${error}`} className="px-4 py-2 text-xs text-coolslate">
                     {row > 0 && (
                       <span className="font-semibold text-carbon dark:text-white mr-1">Row {row}:</span>
@@ -386,7 +414,7 @@ export function ImportModal({ isOpen, onClose, onSuccess }: Props) {
               </div>
             </div>
           )}
-          {result.created === 0 && result.errors.length === 0 && (
+          {result.created === 0 && (result.errors ?? []).length === 0 && (
             <p className="text-sm text-coolslate text-center py-6">No records were imported.</p>
           )}
         </div>

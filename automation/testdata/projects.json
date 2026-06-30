@@ -1,0 +1,23 @@
+[
+  {
+    "id": "fixture-project-001",
+    "name": "Alpha Platform",
+    "code": "ALPHA",
+    "description": "First fixture project for automated tests",
+    "is_active": true
+  },
+  {
+    "id": "fixture-project-002",
+    "name": "Beta Service",
+    "code": "BETA",
+    "description": "Second fixture project for scope tests",
+    "is_active": true
+  },
+  {
+    "id": "fixture-project-003",
+    "name": "Gamma Legacy",
+    "code": "GAMMA",
+    "description": "Legacy project — used for inactive tests",
+    "is_active": false
+  }
+]

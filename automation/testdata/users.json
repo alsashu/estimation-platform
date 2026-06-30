@@ -1,0 +1,38 @@
+[
+  {
+    "id": "fixture-user-001",
+    "firstName": "Alice",
+    "lastName": "TestUser",
+    "username": "alice_testuser",
+    "email": "alice.testuser@estimation.local",
+    "password": "Alice@Test2026!",
+    "roles": ["User"],
+    "projectIds": [],
+    "is_active": true,
+    "description": "Standard active user for general tests"
+  },
+  {
+    "id": "fixture-user-002",
+    "firstName": "Bob",
+    "lastName": "Inactive",
+    "username": "bob_inactive",
+    "email": "bob.inactive@estimation.local",
+    "password": "Bob@Test2026!",
+    "roles": ["User"],
+    "projectIds": [],
+    "is_active": false,
+    "description": "Inactive user — login should fail"
+  },
+  {
+    "id": "fixture-user-003",
+    "firstName": "Carol",
+    "lastName": "AdminUser",
+    "username": "carol_admin",
+    "email": "carol.admin@estimation.local",
+    "password": "Carol@Admin2026!",
+    "roles": ["Admin"],
+    "projectIds": [],
+    "is_active": true,
+    "description": "Admin for RBAC tests"
+  }
+]

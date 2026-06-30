@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { History, Plus, Search, Filter, Download, Eye, Edit2, Trash2, CheckCircle, ClipboardList, Save, Upload } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { estimationsApi } from '../../services/api';
+import { useProjectStore } from '../../store/projectStore';
 import { ImportModal } from './ImportModal';
 import { Button, Card, Badge, Drawer, Modal, EmptyState, SearchInput, Skeleton, SPDot, ConfirmDialog } from '../../components/ui';
 import { useToastStore } from '../../store';
@@ -203,9 +204,66 @@ function ActualsForm({ estimation, onSave, loading }: {
   );
 }
 
+// ─── CSV helpers ──────────────────────────────────────────────────────────────
+
+const CSV_COLUMNS: { header: string; key: keyof Estimation | ((e: Estimation) => string | number | null | undefined) }[] = [
+  { header: 'Title',               key: 'title' },
+  { header: 'Project',             key: 'project_name' },
+  { header: 'Complexity',          key: 'complexity' },
+  { header: 'Risk',                key: 'risk' },
+  { header: 'Competency',          key: 'competency' },
+  { header: 'Story Points',        key: 'story_points' },
+  { header: 'Rev. Min Hours',      key: 'revised_min_hours' },
+  { header: 'Rev. Max Hours',      key: 'revised_max_hours' },
+  { header: 'Rev. Min Days',       key: 'revised_min_days' },
+  { header: 'Rev. Max Days',       key: 'revised_max_days' },
+  { header: 'Estimated Hours',     key: 'estimated_hours' },
+  { header: 'Actual Hours',        key: 'actual_hours' },
+  { header: 'Variance Hours',      key: 'variance_hours' },
+  { header: 'Accuracy %',          key: e => e.accuracy_percent != null ? Number(e.accuracy_percent).toFixed(1) : '' },
+  { header: 'Status',              key: 'status' },
+  { header: 'Created At',          key: e => e.created_at ? new Date(e.created_at).toISOString().slice(0, 10) : '' },
+  { header: 'Notes',               key: 'notes' },
+];
+
+function escapeCell(value: string | number | null | undefined): string {
+  if (value == null) return '';
+  const str = String(value);
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+function buildCsv(rows: Estimation[]): string {
+  const header = CSV_COLUMNS.map(c => c.header).join(',');
+  const lines = rows.map(row =>
+    CSV_COLUMNS.map(c => {
+      const val = typeof c.key === 'function' ? c.key(row) : row[c.key];
+      return escapeCell(val as string | number | null | undefined);
+    }).join(',')
+  );
+  return [header, ...lines].join('\n');
+}
+
+function downloadCsv(content: string, filename: string) {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export default function HistoricalData() {
   const qc = useQueryClient();
   const { addToast } = useToastStore();
+  const { selectedProjectId } = useProjectStore();
   const [search, setSearch] = useState('');
   const [complexity, setComplexity] = useState('');
   const [risk, setRisk] = useState('');
@@ -214,12 +272,41 @@ export default function HistoricalData() {
   const [drawerEst, setDrawerEst] = useState<Estimation | null>(null);
   const [deleteEst, setDeleteEst] = useState<Estimation | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
-  const params = { search: search || undefined, complexity: complexity || undefined, risk: risk || undefined, status: status || undefined, page, limit: 15 };
+  const filterParams = {
+    search: search || undefined,
+    complexity: complexity || undefined,
+    risk: risk || undefined,
+    status: status || undefined,
+    project_id: selectedProjectId ?? undefined,
+  };
+
+  const params = { ...filterParams, page, limit: 15 };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await estimationsApi.getAll({ ...filterParams, limit: 5000, page: 1 });
+      if (!res.data.length) {
+        addToast({ type: 'warning', title: 'Nothing to export', message: 'No records match the current filters.' });
+        return;
+      }
+      const csv = buildCsv(res.data);
+      const date = new Date().toISOString().slice(0, 10);
+      const projectPart = selectedProjectId ? `-project` : '';
+      downloadCsv(csv, `estimations${projectPart}-${date}.csv`);
+      addToast({ type: 'success', title: 'Export complete', message: `${res.data.length} records downloaded.` });
+    } catch {
+      addToast({ type: 'error', title: 'Export failed', message: 'Could not fetch records for export.' });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ['estimations', params],
-    queryFn: () => estimationsApi.getAll(params as any),
+    queryFn: () => estimationsApi.getAll(params as Record<string, unknown>),
     retry: false,
   });
 
@@ -262,7 +349,7 @@ export default function HistoricalData() {
           <p className="text-sm text-coolslate mt-0.5">{total} estimations total</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" icon={<Download size={15} />}>Export CSV</Button>
+          <Button variant="outline" size="sm" icon={<Download size={15} />} onClick={handleExport} loading={exporting}>Export CSV</Button>
           <Button variant="outline" size="sm" icon={<Upload size={15} />} onClick={() => setImportOpen(true)}>Import Excel</Button>
           <Link to="/estimate"><Button size="sm" icon={<Plus size={15} />}>Storypoint Estimation</Button></Link>
         </div>
@@ -431,6 +518,7 @@ export default function HistoricalData() {
         isOpen={importOpen}
         onClose={() => setImportOpen(false)}
         onSuccess={() => qc.invalidateQueries({ queryKey: ['estimations'] })}
+        projectId={selectedProjectId}
       />
 
       {/* Delete confirm */}

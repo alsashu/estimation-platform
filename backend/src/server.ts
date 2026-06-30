@@ -10,14 +10,19 @@ import path from 'path';
 import { initDatabase } from './db/init';
 import routes from './routes/index';
 import monitoringRoutes from './routes/monitoring.routes';
+import authRoutes from './routes/auth.routes';
+import userRoutes from './routes/users.routes';
+import projectRoutes from './routes/projects.routes';
+import roleRoutes from './routes/roles.routes';
+import registrationRoutes from './routes/registrations.routes';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
+import { apiLimiter } from './middleware/rateLimiter';
 import { logger } from './logger';
 import { swaggerSpec } from './config/swagger';
 
 dotenv.config();
 
-// Ensure logs directory exists before Winston tries to write files
 const logsDir = path.join(process.cwd(), 'logs');
 if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 
@@ -28,7 +33,6 @@ const PORT = process.env.PORT ?? 4000;
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
-    // Allow swagger-ui to load its own scripts/styles
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
@@ -56,32 +60,29 @@ app.use(
   swaggerUi.serve,
   swaggerUi.setup(swaggerSpec, {
     customSiteTitle: 'Estimation Platform — API Docs',
-    customCss: `
-      .swagger-ui .topbar { background: #1E3246; }
-      .swagger-ui .topbar .link { display: none; }
-      .swagger-ui .info .title { color: #1E3246; }
-    `,
-    swaggerOptions: {
-      persistAuthorization: true,
-      tryItOutEnabled: true,
-      displayRequestDuration: true,
-      filter: true,
-      syntaxHighlight: { theme: 'monokai' },
-    },
+    customCss: `.swagger-ui .topbar { background: #1E3246; } .swagger-ui .topbar .link { display: none; } .swagger-ui .info .title { color: #1E3246; }`,
+    swaggerOptions: { persistAuthorization: true, tryItOutEnabled: true, displayRequestDuration: true, filter: true },
   }),
 );
-
-// Serve the raw JSON spec
 app.get('/api-docs.json', (_req, res) => res.json(swaggerSpec));
 
-// ─── Simple liveness (outside /api — for load balancers) ─────────────────────
+// ─── Liveness ─────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) =>
   res.json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() }),
 );
 
-// ─── API & monitoring routes ──────────────────────────────────────────────────
-app.use('/api', routes);
+// ─── Auth routes (public — rate limiting applied per route) ──────────────────
+app.use('/api/auth', authRoutes);
+
+// ─── Protected API routes ─────────────────────────────────────────────────────
+app.use('/api', apiLimiter, routes);
 app.use('/api/monitoring', monitoringRoutes);
+
+// ─── Enterprise management routes ────────────────────────────────────────────
+app.use('/api/users',         userRoutes);
+app.use('/api/projects',      projectRoutes);
+app.use('/api/roles',         roleRoutes);
+app.use('/api/registrations', registrationRoutes);
 
 // ─── 404 & global error handler ──────────────────────────────────────────────
 app.use(notFound);
@@ -90,7 +91,7 @@ app.use(errorHandler);
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 async function start(): Promise<void> {
   try {
-    logger.info('Starting Estimation Platform...', { category: 'system' });
+    logger.info('Starting Estimation Platform (Enterprise)...', { category: 'system' });
     await initDatabase();
     logger.info('Database initialised', { category: 'database' });
 

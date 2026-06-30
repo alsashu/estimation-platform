@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Calculator, TrendingUp, Clock, Target, CheckCircle, AlertCircle, BarChart3, ChevronRight, Sigma } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell, CartesianGrid } from 'recharts';
 import { analysisApi, estimationsApi } from '../../services/api';
+import { useProjectStore } from '../../store/projectStore';
 import { StatCard, Card, Badge, Skeleton, Button, SPDot, Modal } from '../../components/ui';
 import { fmt, accuracyBg, cn } from '../../utils/formatters';
 import { SP_COLORS, COMPLEXITY_COLORS, CHART_COLORS } from '../../config/theme';
@@ -88,11 +89,14 @@ function EstimationMethodModal({ isOpen, onClose }: { isOpen: boolean; onClose: 
 
 export default function Dashboard() {
   const [showModal, setShowModal] = useState(false);
+  const { selectedProjectId } = useProjectStore();
+  const projectParam = selectedProjectId ? { projectId: selectedProjectId } : {};
+  const projectFilter = selectedProjectId ? { project_id: selectedProjectId } : {};
 
-  const { data: summary, isLoading: sumLoading } = useQuery({ queryKey: ['analysis-summary'], queryFn: () => analysisApi.getSummary(), retry: false });
-  const { data: trend, isLoading: trendLoading } = useQuery({ queryKey: ['trend'], queryFn: () => analysisApi.getTrend({ days: 30 }), retry: false });
-  const { data: complexityData } = useQuery({ queryKey: ['complexity-breakdown'], queryFn: () => analysisApi.getByComplexity(), retry: false });
-  const { data: recentData } = useQuery({ queryKey: ['estimations-recent'], queryFn: () => estimationsApi.getAll({ limit: 8, page: 1 }), retry: false });
+  const { data: summary, isLoading: sumLoading } = useQuery({ queryKey: ['analysis-summary', selectedProjectId], queryFn: () => analysisApi.getSummary(projectParam), retry: false });
+  const { data: trend, isLoading: trendLoading } = useQuery({ queryKey: ['trend', selectedProjectId], queryFn: () => analysisApi.getTrend({ days: 30, ...projectParam }), retry: false });
+  const { data: complexityData } = useQuery({ queryKey: ['complexity-breakdown', selectedProjectId], queryFn: () => analysisApi.getByComplexity(projectParam), retry: false });
+  const { data: recentData } = useQuery({ queryKey: ['estimations-recent', selectedProjectId], queryFn: () => estimationsApi.getAll({ limit: 8, page: 1, ...projectFilter }), retry: false });
 
   const recentEstimations: Estimation[] = recentData?.data || [];
 

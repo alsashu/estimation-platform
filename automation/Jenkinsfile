@@ -1,0 +1,111 @@
+pipeline {
+    agent any
+
+    tools {
+        nodejs '20'
+    }
+
+    parameters {
+        choice(name: 'BROWSER', choices: ['chrome', 'firefox', 'edge'], description: 'Browser to run tests on')
+        booleanParam(name: 'HEADLESS', defaultValue: true, description: 'Run in headless mode')
+        string(name: 'SUITE', defaultValue: '', description: 'Test suite subdirectory (empty = all)')
+    }
+
+    triggers {
+        cron('H 2 * * *')
+    }
+
+    environment {
+        WORKING_DIR = 'automation'
+        BASE_URL = credentials('ESTIMATION_BASE_URL')
+        API_URL = credentials('ESTIMATION_API_URL')
+        GSA_EMAIL = credentials('ESTIMATION_GSA_EMAIL')
+        GSA_PASSWORD = credentials('ESTIMATION_GSA_PASSWORD')
+        ADMIN_EMAIL = credentials('ESTIMATION_ADMIN_EMAIL')
+        ADMIN_PASSWORD = credentials('ESTIMATION_ADMIN_PASSWORD')
+        USER_EMAIL = credentials('ESTIMATION_USER_EMAIL')
+        USER_PASSWORD = credentials('ESTIMATION_USER_PASSWORD')
+        INACTIVE_EMAIL = credentials('ESTIMATION_INACTIVE_EMAIL')
+        INACTIVE_PASSWORD = credentials('ESTIMATION_INACTIVE_PASSWORD')
+    }
+
+    options {
+        timeout(time: 35, unit: 'MINUTES')
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                dir(WORKING_DIR) {
+                    sh 'npm ci'
+                }
+            }
+        }
+
+        stage('Run Selenium Tests') {
+            steps {
+                dir(WORKING_DIR) {
+                    script {
+                        def cmd = params.SUITE?.trim()
+                          ? "npm run test -- --spec 'tests/${params.SUITE}/**/*.test.js'"
+                          : 'npm run test:parallel:ci'
+                        sh """
+                            export BROWSER=${params.BROWSER}
+                            export HEADLESS=${params.HEADLESS}
+                            ${cmd}
+                        """
+                    }
+                }
+            }
+            post {
+                always {
+                    dir(WORKING_DIR) {
+                        sh 'npm run report:generate || true'
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            dir(WORKING_DIR) {
+                publishHTML(target: [
+                    allowMissing: true,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: 'reports',
+                    reportFiles: 'index.html',
+                    reportName: 'Selenium Allure Report'
+                ])
+                archiveArtifacts artifacts: 'allure-results/**', allowEmptyArchive: true
+            }
+        }
+        failure {
+            dir(WORKING_DIR) {
+                archiveArtifacts artifacts: 'screenshots/**,logs/**', allowEmptyArchive: true
+            }
+            emailext(
+                subject: "FAILED: Selenium Tests - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
+                    <p>Selenium E2E tests failed.</p>
+                    <p>Build URL: <a href='${env.BUILD_URL}'>${env.BUILD_URL}</a></p>
+                    <p>Browser: ${params.BROWSER}</p>
+                """,
+                to: '${DEFAULT_RECIPIENTS}',
+                mimeType: 'text/html'
+            )
+        }
+        success {
+            echo 'All Selenium tests passed!'
+        }
+    }
+}

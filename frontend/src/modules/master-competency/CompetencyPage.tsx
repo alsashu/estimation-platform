@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users, Edit2, Save, X } from 'lucide-react';
 import { masterApi } from '../../services/api';
@@ -80,6 +81,7 @@ function InlineEditor({ cfg, onSave, onCancel, loading }: { cfg: CompetencyOverh
 }
 
 export default function CompetencyPage() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const { addToast } = useToastStore();
   const [editCfg, setEditCfg] = useState<CompetencyOverheadConfig | undefined>();
@@ -101,12 +103,23 @@ export default function CompetencyPage() {
           <h1 className="text-2xl font-display font-bold text-carbon dark:text-white flex items-center gap-2"><Users size={22} /> Competency Levels</h1>
           <p className="text-sm text-coolslate mt-0.5">Manage overhead percentages and competency definitions</p>
         </div>
-        <div className="flex gap-1 bg-lgrayblue/30 dark:bg-slate-700/40 rounded-lg p-1">
-          {(['matrix', 'definitions'] as const).map(t => (
-            <button key={t} onClick={() => setActiveTab(t)}
-              className={`px-4 py-1.5 rounded-md text-xs font-medium transition-all capitalize ${activeTab === t ? 'bg-white dark:bg-carbon-700 text-carbon dark:text-white shadow-sm' : 'text-coolslate hover:text-carbon dark:hover:text-white'}`}
-            >{t}</button>
-          ))}
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1 bg-lgrayblue/30 dark:bg-slate-700/40 rounded-lg p-1">
+            <button onClick={() => navigate('/master/story-points')}
+              className="px-4 py-1.5 rounded-md text-xs font-medium transition-all text-coolslate hover:text-carbon dark:hover:text-white">
+              Story Points
+            </button>
+            <button className="px-4 py-1.5 rounded-md text-xs font-medium transition-all bg-white dark:bg-carbon-700 text-carbon dark:text-white shadow-sm">
+              Competency Levels
+            </button>
+          </div>
+          <div className="flex gap-1 bg-lgrayblue/30 dark:bg-slate-700/40 rounded-lg p-1">
+            {(['matrix', 'definitions'] as const).map(t => (
+              <button key={t} onClick={() => setActiveTab(t)}
+                className={`px-4 py-1.5 rounded-md text-xs font-medium transition-all capitalize ${activeTab === t ? 'bg-white dark:bg-carbon-700 text-carbon dark:text-white shadow-sm' : 'text-coolslate hover:text-carbon dark:hover:text-white'}`}
+              >{t}</button>
+            ))}
+          </div>
         </div>
       </div>
 

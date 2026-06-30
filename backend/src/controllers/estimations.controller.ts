@@ -7,6 +7,7 @@ const createSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   project_name: z.string().optional(),
+  project_id: z.string().uuid().optional(),
   complexity: z.enum(['Low', 'Medium', 'High', 'Very High', 'Unmanageable']),
   risk: z.enum(['Low', 'Medium', 'High', 'Very High', 'Unknown']),
   competency: z.enum(['Emerging', 'Competent', 'Expert']),
@@ -23,16 +24,28 @@ const actualsSchema = z.object({
 });
 
 export async function getAll(req: Request, res: Response): Promise<void> {
-  const { page = 1, limit = 20, status, complexity, risk, project_name, search } = req.query;
+  const { page = 1, limit = 20, status, complexity, risk, project_name, search, project_id } = req.query;
   const offset = (Number(page) - 1) * Number(limit);
 
   let where = 'WHERE 1=1';
   const params: unknown[] = [];
   let i = 1;
 
+  // Project-based access scoping
+  if (req.user && req.user.projectIds !== '*') {
+    const ids = req.user.projectIds as string[];
+    if (ids.length === 0) {
+      res.json({ success: true, data: [], total: 0, page: Number(page), limit: Number(limit) });
+      return;
+    }
+    where += ` AND project_id = ANY($${i++}::uuid[])`;
+    params.push(ids);
+  }
+
   if (status)       { where += ` AND status = $${i++}`;        params.push(status); }
   if (complexity)   { where += ` AND complexity = $${i++}`;    params.push(complexity); }
   if (risk)         { where += ` AND risk = $${i++}`;          params.push(risk); }
+  if (project_id)   { where += ` AND project_id = $${i++}`;   params.push(project_id); }
   if (project_name) { where += ` AND project_name ILIKE $${i++}`; params.push(`%${project_name}%`); }
   if (search)       { where += ` AND (title ILIKE $${i++} OR project_name ILIKE $${i} OR description ILIKE $${i++})`; params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
 
@@ -76,15 +89,17 @@ export async function create(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  const createdBy = req.user?.userId ?? null;
+
   const [row] = await query(
     `INSERT INTO estimations
-       (title, description, project_name, complexity, risk, competency,
+       (title, description, project_name, project_id, complexity, risk, competency,
         story_points, initial_min_days, initial_max_days, initial_min_hours, initial_max_hours,
-        overhead_percent, revised_min_days, revised_max_days, revised_min_hours, revised_max_hours, notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        overhead_percent, revised_min_days, revised_max_days, revised_min_hours, revised_max_hours, notes, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      RETURNING *`,
     [
-      body.title, body.description, body.project_name,
+      body.title, body.description, body.project_name, body.project_id ?? null,
       body.complexity, body.risk, body.competency,
       calc.story_points,
       calc.initial_min_days, calc.initial_max_days,
@@ -92,7 +107,7 @@ export async function create(req: Request, res: Response): Promise<void> {
       calc.overhead_percent,
       calc.revised_min_days, calc.revised_max_days,
       calc.revised_min_hours, calc.revised_max_hours,
-      body.notes,
+      body.notes, createdBy,
     ]
   );
 
@@ -175,6 +190,7 @@ export async function remove(req: Request, res: Response): Promise<void> {
 const importRowSchema = z.object({
   title: z.string().min(1).max(255),
   project_name: z.string().optional(),
+  project_id: z.string().uuid().optional(),
   description: z.string().optional(),
   complexity: z.enum(['Low', 'Medium', 'High', 'Very High', 'Unmanageable']),
   risk: z.enum(['Low', 'Medium', 'High', 'Very High', 'Unknown']),
@@ -201,12 +217,12 @@ export async function batchImport(req: Request, res: Response): Promise<void> {
       }
       await query(
         `INSERT INTO estimations
-           (title, description, project_name, complexity, risk, competency,
+           (title, description, project_name, project_id, complexity, risk, competency,
             story_points, initial_min_days, initial_max_days, initial_min_hours, initial_max_hours,
             overhead_percent, revised_min_days, revised_max_days, revised_min_hours, revised_max_hours, notes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
         [
-          row.title, row.description ?? null, row.project_name ?? null,
+          row.title, row.description ?? null, row.project_name ?? null, row.project_id ?? null,
           row.complexity, row.risk, row.competency,
           calc.story_points,
           calc.initial_min_days, calc.initial_max_days,
