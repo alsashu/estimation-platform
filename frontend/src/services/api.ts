@@ -258,7 +258,7 @@ export const estimationsApi = {
 
   create: (body: {
     title: string; description?: string; project_name?: string; project_id?: string;
-    complexity: string; risk: string; competency: string; notes?: string;
+    complexity: string; risk: string; competency: string; work_group: string; notes?: string;
   }) => api.post<{ success: boolean; data: Estimation }>('/estimations', body).then(r => r.data.data!),
 
   update: (id: string, body: Partial<Estimation>) =>
@@ -270,7 +270,7 @@ export const estimationsApi = {
   delete: (id: string) =>
     api.delete<{ success: boolean }>(`/estimations/${id}`).then(r => r.data),
 
-  batchImport: (rows: { title: string; project_name?: string; project_id?: string; description?: string; complexity: string; risk: string; competency: string; notes?: string }[]) =>
+  batchImport: (rows: { title: string; project_name?: string; project_id?: string; description?: string; complexity: string; risk: string; competency: string; work_group: string; notes?: string }[]) =>
     api.post<{ success: boolean; created: number; errors: { row: number; error: string }[] }>('/estimations/import', { rows }).then(r => r.data),
 };
 

@@ -203,9 +203,7 @@ export default function Dashboard() {
             <div className="py-10 text-center">
               <Calculator size={24} className="text-coolslate mx-auto mb-2 opacity-40" />
               <p className="text-sm text-coolslate">No estimations yet</p>
-              <button onClick={() => setShowModal(true)} className="mt-3 inline-block">
-                <Button size="sm">Create your first estimate</Button>
-              </button>
+              <Button size="sm" className="mt-3" onClick={() => setShowModal(true)}>Create your first estimate</Button>
             </div>
           ) : (
             recentEstimations.map((e) => (

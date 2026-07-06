@@ -9,6 +9,7 @@ import { cn } from '../../utils/formatters';
 const COMPLEXITY_OPTIONS = ['Low', 'Medium', 'High', 'Very High', 'Unmanageable'] as const;
 const RISK_OPTIONS       = ['Low', 'Medium', 'High', 'Very High', 'Unknown']       as const;
 const COMPETENCY_OPTIONS = ['Emerging', 'Competent', 'Expert']                      as const;
+const WORK_GROUP_OPTIONS = ['DEVELOPMENT', 'VALIDATION', 'SPECIFICATION']          as const;
 
 function normalizeEnum<T extends readonly string[]>(val: string, opts: T): T[number] | null {
   const t = val.trim();
@@ -23,6 +24,7 @@ interface ParsedRow {
   complexity: string;
   risk: string;
   competency: string;
+  work_group: string;
   notes: string;
   errors: string[];
   valid: boolean;
@@ -61,12 +63,12 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
     const XLSX = await import('xlsx');
     const wb = XLSX.utils.book_new();
 
-    const headers = ['Title *', 'Project Name', 'Description', 'Complexity *', 'Risk *', 'Competency *', 'Notes'];
-    const example = ['Fix login redirect bug', 'Auth Module', 'OAuth callback mismatch', 'Medium', 'Low', 'Competent', 'JIRA-123'];
+    const headers = ['Title *', 'Project Name', 'Description', 'Complexity *', 'Risk *', 'Competency *', 'Work Group *', 'Notes'];
+    const example = ['Fix login redirect bug', 'Auth Module', 'OAuth callback mismatch', 'Medium', 'Low', 'Competent', 'DEVELOPMENT', 'JIRA-123'];
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
     ws['!cols'] = [
       { wch: 35 }, { wch: 22 }, { wch: 30 },
-      { wch: 20 }, { wch: 18 }, { wch: 15 }, { wch: 28 },
+      { wch: 20 }, { wch: 18 }, { wch: 15 }, { wch: 18 }, { wch: 28 },
     ];
     XLSX.utils.book_append_sheet(wb, ws, 'Import Template');
 
@@ -75,6 +77,7 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
       ['Complexity *', COMPLEXITY_OPTIONS.join(', ')],
       ['Risk *',       RISK_OPTIONS.join(', ')],
       ['Competency *', COMPETENCY_OPTIONS.join(', ')],
+      ['Work Group *', WORK_GROUP_OPTIONS.join(', ')],
       ['', ''],
       ['Note', 'Row 2 in the Import Template is an example — delete it before importing your data.'],
       ['Note', 'Fields marked * are required. Estimated Hours and Actual Hours are entered manually after import.'],
@@ -104,6 +107,7 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
         const rawComplexity = s(3);
         const rawRisk       = s(4);
         const rawCompetency = s(5);
+        const rawWorkGroup  = s(6);
 
         const errors: string[] = [];
         if (!rawTitle)              errors.push('Title is required');
@@ -121,6 +125,10 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
         if (!rawCompetency)  errors.push('Competency is required');
         else if (!competency) errors.push(`Invalid Competency "${rawCompetency}" — valid: ${COMPETENCY_OPTIONS.join(', ')}`);
 
+        const workGroup = normalizeEnum(rawWorkGroup, WORK_GROUP_OPTIONS);
+        if (!rawWorkGroup)  errors.push('Work Group is required');
+        else if (!workGroup) errors.push(`Invalid Work Group "${rawWorkGroup}" — valid: ${WORK_GROUP_OPTIONS.join(', ')}`);
+
         parsed.push({
           rowNum:       i + 1,
           title:        rawTitle,
@@ -129,7 +137,8 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
           complexity:   complexity   || rawComplexity,
           risk:         risk         || rawRisk,
           competency:   competency   || rawCompetency,
-          notes:        s(6),
+          work_group:   workGroup    || rawWorkGroup,
+          notes:        s(7),
           errors,
           valid: errors.length === 0,
         });
@@ -177,6 +186,7 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
           complexity:   r.complexity,
           risk:         r.risk,
           competency:   r.competency,
+          work_group:   r.work_group,
           notes:        r.notes         || undefined,
         }))
       );
@@ -300,7 +310,7 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
               <table className="w-full text-xs">
                 <thead className="sticky top-0 z-10 bg-lgrayblue/20 dark:bg-carbon-800/90">
                   <tr>
-                    {['Row', 'Title', 'Project', 'Complexity', 'Risk', 'Competency', 'Validation'].map(h => (
+                    {['Row', 'Title', 'Project', 'Complexity', 'Risk', 'Competency', 'Work Group', 'Validation'].map(h => (
                       <th key={h} className="px-3 py-2.5 text-left font-semibold text-coolslate uppercase tracking-wide whitespace-nowrap first:pl-4">{h}</th>
                     ))}
                   </tr>
@@ -334,6 +344,11 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
                         row.competency && !COMPETENCY_OPTIONS.includes(row.competency as typeof COMPETENCY_OPTIONS[number]) && 'text-vibrant font-semibold'
                       )}>
                         {row.competency || <span className="text-vibrant italic font-normal">missing</span>}
+                      </td>
+                      <td className={cn('px-3 py-2.5 whitespace-nowrap',
+                        row.work_group && !WORK_GROUP_OPTIONS.includes(row.work_group as typeof WORK_GROUP_OPTIONS[number]) && 'text-vibrant font-semibold'
+                      )}>
+                        {row.work_group || <span className="text-vibrant italic font-normal">missing</span>}
                       </td>
                       <td className="px-3 py-2.5 min-w-[160px]">
                         {row.valid ? (

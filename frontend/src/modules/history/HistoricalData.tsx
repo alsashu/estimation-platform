@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { estimationsApi } from '../../services/api';
 import { useProjectStore } from '../../store/projectStore';
 import { ImportModal } from './ImportModal';
-import { Button, Card, Badge, Drawer, Modal, EmptyState, SearchInput, Skeleton, SPDot, ConfirmDialog } from '../../components/ui';
+import { Button, Card, Badge, Drawer, Modal, EmptyState, SearchInput, Skeleton, SPDot, ConfirmDialog, Tooltip } from '../../components/ui';
 import { useToastStore } from '../../store';
 import { fmt, accuracyBg, accuracyColor, cn } from '../../utils/formatters';
 import { SP_COLORS, COMPLEXITY_COLORS } from '../../config/theme';
@@ -13,16 +13,19 @@ import type { Estimation, ComplexityLevel, RiskLevel, EstimationStatus } from '.
 
 const COMPLEXITY_OPTIONS = ['', 'Low', 'Medium', 'High', 'Very High', 'Unmanageable'];
 const RISK_OPTIONS = ['', 'Low', 'Medium', 'High', 'Very High', 'Unknown'];
+const WORK_GROUP_OPTIONS = ['', 'DEVELOPMENT', 'VALIDATION', 'SPECIFICATION'];
 const STATUS_OPTIONS = ['', 'open', 'completed'];
 
 function EstimationRow({ est, onView, onDelete }: { est: Estimation; onView: (e: Estimation) => void; onDelete: (e: Estimation) => void }) {
   return (
     <tr className="group hover:bg-lgrayblue/10 dark:hover:bg-slate-700/20 transition-colors border-b border-lgrayblue/20 dark:border-slate-700/40 last:border-0">
       <td className="px-5 py-3.5">
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 min-w-0">
           <SPDot color={SP_COLORS[est.story_points] || '#788291'} size={8} />
-          <div>
-            <p className="text-sm font-medium text-carbon dark:text-white">{est.title}</p>
+          <div className="min-w-0">
+            <Tooltip content={est.title}>
+              <p className="text-sm font-medium text-carbon dark:text-white truncate max-w-[220px] cursor-default">{est.title}</p>
+            </Tooltip>
             <p className="text-xs text-coolslate">{est.project_name || '—'}</p>
           </div>
         </div>
@@ -31,6 +34,9 @@ function EstimationRow({ est, onView, onDelete }: { est: Estimation; onView: (e:
         <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: COMPLEXITY_COLORS[est.complexity] + '18', color: COMPLEXITY_COLORS[est.complexity] }}>
           {est.complexity}
         </span>
+      </td>
+      <td className="px-4 py-3.5 hidden md:table-cell">
+        <span className="text-xs font-semibold text-coolslate">{est.work_group}</span>
       </td>
       <td className="px-4 py-3.5 hidden lg:table-cell">
         <span className="text-sm font-bold text-carbon dark:text-white" style={{ color: SP_COLORS[est.story_points] }}>{est.story_points} SP</span>
@@ -212,6 +218,7 @@ const CSV_COLUMNS: { header: string; key: keyof Estimation | ((e: Estimation) =>
   { header: 'Complexity',          key: 'complexity' },
   { header: 'Risk',                key: 'risk' },
   { header: 'Competency',          key: 'competency' },
+  { header: 'Work Group',          key: 'work_group' },
   { header: 'Story Points',        key: 'story_points' },
   { header: 'Rev. Min Hours',      key: 'revised_min_hours' },
   { header: 'Rev. Max Hours',      key: 'revised_max_hours' },
@@ -267,6 +274,7 @@ export default function HistoricalData() {
   const [search, setSearch] = useState('');
   const [complexity, setComplexity] = useState('');
   const [risk, setRisk] = useState('');
+  const [workGroup, setWorkGroup] = useState('');
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
   const [drawerEst, setDrawerEst] = useState<Estimation | null>(null);
@@ -278,6 +286,7 @@ export default function HistoricalData() {
     search: search || undefined,
     complexity: complexity || undefined,
     risk: risk || undefined,
+    work_group: workGroup || undefined,
     status: status || undefined,
     project_id: selectedProjectId ?? undefined,
   };
@@ -362,6 +371,7 @@ export default function HistoricalData() {
           {[
             { label: 'Complexity', value: complexity, options: COMPLEXITY_OPTIONS, set: setComplexity },
             { label: 'Risk', value: risk, options: RISK_OPTIONS, set: setRisk },
+            { label: 'Work Group', value: workGroup, options: WORK_GROUP_OPTIONS, set: setWorkGroup },
             { label: 'Status', value: status, options: STATUS_OPTIONS, set: setStatus },
           ].map(({ label, value, options, set }) => (
             <select key={label} value={value} onChange={(e) => { set(e.target.value); setPage(1); }}
@@ -371,8 +381,8 @@ export default function HistoricalData() {
               {options.filter(Boolean).map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
           ))}
-          {(search || complexity || risk || status) && (
-            <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setComplexity(''); setRisk(''); setStatus(''); setPage(1); }}>Clear</Button>
+          {(search || complexity || risk || workGroup || status) && (
+            <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setComplexity(''); setRisk(''); setWorkGroup(''); setStatus(''); setPage(1); }}>Clear</Button>
           )}
         </div>
       </Card>
@@ -383,7 +393,7 @@ export default function HistoricalData() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-lgrayblue/30 dark:border-slate-700">
-                {['Task', 'Complexity', 'SP', 'Revised Effort', 'Est. Hours', 'Actual Hours', 'Variance', 'Accuracy', 'Status', 'Date', ''].map((h) => (
+                {['Task', 'Complexity', 'Work Group', 'SP', 'Revised Effort', 'Est. Hours', 'Actual Hours', 'Variance', 'Accuracy', 'Status', 'Date', ''].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-coolslate uppercase tracking-wide first:pl-5">
                     {h}
                   </th>
@@ -394,13 +404,13 @@ export default function HistoricalData() {
               {isLoading ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={i} className="border-b border-lgrayblue/20 dark:border-slate-700/40">
-                    {Array.from({ length: 11 }).map((_, j) => (
+                    {Array.from({ length: 12 }).map((_, j) => (
                       <td key={j} className="px-4 py-3.5"><Skeleton className="h-4 w-full" /></td>
                     ))}
                   </tr>
                 ))
               ) : estimations.length === 0 ? (
-                <tr><td colSpan={11}>
+                <tr><td colSpan={12}>
                   <EmptyState icon={<ClipboardList size={28} />} title="No estimations found"
                     message={search || complexity ? "Try adjusting your filters" : "Create your first estimation to get started"}
                     action={<Link to="/estimate"><Button size="sm">Storypoint Estimation</Button></Link>}
@@ -432,6 +442,7 @@ export default function HistoricalData() {
                 { l: 'Complexity', v: drawerEst.complexity },
                 { l: 'Risk', v: drawerEst.risk },
                 { l: 'Competency', v: drawerEst.competency },
+                { l: 'Work Group', v: drawerEst.work_group },
                 { l: 'Story Points', v: String(drawerEst.story_points) },
                 { l: 'Overhead', v: fmt.pct(drawerEst.overhead_percent) },
                 { l: 'Status', v: drawerEst.status },

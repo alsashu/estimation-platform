@@ -1,6 +1,7 @@
 export type ComplexityLevel = 'Low' | 'Medium' | 'High' | 'Very High' | 'Unmanageable';
 export type RiskLevel       = 'Low' | 'Medium' | 'High' | 'Very High' | 'Unknown';
 export type CompetencyLevel = 'Emerging' | 'Competent' | 'Expert';
+export type WorkGroup = 'DEVELOPMENT' | 'VALIDATION' | 'SPECIFICATION';
 export type EstimationStatus = 'open' | 'completed';
 export type Theme = 'light' | 'dark';
 
@@ -82,6 +83,7 @@ export interface Estimation {
   complexity: ComplexityLevel;
   risk: RiskLevel;
   competency: CompetencyLevel;
+  work_group: WorkGroup;
   story_points: number;
   initial_min_days: number;
   initial_max_days: number;

@@ -10,11 +10,12 @@ import { Button, Card, StepIndicator, Modal, SPDot } from '../../components/ui';
 import { useToastStore } from '../../store';
 import { fmt, cn } from '../../utils/formatters';
 import { SP_COLORS, COMPLEXITY_COLORS, RISK_COLORS, COMPETENCY_COLORS } from '../../config/theme';
-import type { ComplexityLevel, RiskLevel, CompetencyLevel, CalculationResult } from '../../types';
+import type { ComplexityLevel, RiskLevel, CompetencyLevel, WorkGroup, CalculationResult } from '../../types';
 
 const COMPLEXITIES: ComplexityLevel[] = ['Low', 'Medium', 'High', 'Very High', 'Unmanageable'];
 const RISKS: RiskLevel[] = ['Low', 'Medium', 'High', 'Very High', 'Unknown'];
 const COMPETENCIES: CompetencyLevel[] = ['Emerging', 'Competent', 'Expert'];
+const WORK_GROUPS: WorkGroup[] = ['DEVELOPMENT', 'VALIDATION', 'SPECIFICATION'];
 
 const COMPLEXITY_DESC: Record<ComplexityLevel, string> = {
   'Low': 'Single feature within a module. Clear, unambiguous requirements.',
@@ -46,6 +47,7 @@ interface FormData {
   complexity: ComplexityLevel | '';
   risk: RiskLevel | '';
   competency: CompetencyLevel | '';
+  work_group: WorkGroup | '';
 }
 
 function LivePreview({ calc, complexity, risk, competency }: { calc?: CalculationResult; complexity: string; risk: string; competency: string }) {
@@ -106,7 +108,7 @@ export default function EstimationWizard() {
   const [step, setStep] = useState(0);
   const [showDocModal, setShowDocModal] = useState(false);
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
-    defaultValues: { title: '', project_name: '', description: '', notes: '', complexity: '', risk: '', competency: '' },
+    defaultValues: { title: '', project_name: '', description: '', notes: '', complexity: '', risk: '', competency: '', work_group: '' },
   });
 
   // Auto-populate project name from selected project
@@ -120,6 +122,7 @@ export default function EstimationWizard() {
   const complexity = watch('complexity');
   const risk = watch('risk');
   const competency = watch('competency');
+  const workGroup = watch('work_group');
 
   // Live calculation
   const { data: calc } = useQuery({
@@ -141,17 +144,18 @@ export default function EstimationWizard() {
   });
 
   const onSubmit = (data: FormData) => {
-    if (!data.complexity || !data.risk || !data.competency) return;
+    if (!data.complexity || !data.risk || !data.competency || !data.work_group) return;
     mutation.mutate({
       ...data,
       complexity: data.complexity,
       risk: data.risk,
       competency: data.competency,
+      work_group: data.work_group,
       project_id: selectedProjectId ?? undefined,
     });
   };
 
-  const canNext0 = !!complexity && !!risk;
+  const canNext0 = !!complexity && !!risk && !!workGroup;
   const canNext1 = !!competency;
 
   function RadioGroup<T extends string>({ options, value, onChange, colors, descriptions }: {
@@ -229,6 +233,15 @@ export default function EstimationWizard() {
                           className="w-full px-3 py-2.5 rounded-lg border border-lgrayblue dark:border-slate-600 bg-white dark:bg-carbon-800 text-sm text-carbon dark:text-white focus:outline-none focus:ring-2 focus:ring-carbon/20 focus:border-carbon transition-colors resize-none"
                         />
                       </div>
+                      <div>
+                        <label className="text-sm font-medium text-carbon dark:text-lgrayblue block mb-1">Work Group *</label>
+                        <select {...register('work_group', { required: true })}
+                          className="w-full px-3 py-2.5 rounded-lg border border-lgrayblue dark:border-slate-600 bg-white dark:bg-carbon-800 text-sm text-carbon dark:text-white focus:outline-none focus:ring-2 focus:ring-carbon/20 focus:border-carbon transition-colors"
+                        >
+                          <option value="">Select work group…</option>
+                          {WORK_GROUPS.map((wg) => <option key={wg} value={wg}>{wg}</option>)}
+                        </select>
+                      </div>
                     </div>
                   </Card>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -283,6 +296,7 @@ export default function EstimationWizard() {
                       {[
                         ['Task', watch('title')], ['Project', watch('project_name') || '—'],
                         ['Complexity', complexity], ['Risk', risk], ['Competency', competency],
+                        ['Work Group', workGroup],
                       ].map(([l, v]) => (
                         <div key={l} className="flex justify-between gap-4 text-sm border-b border-lgrayblue/20 dark:border-slate-700/50 pb-2 last:border-0">
                           <span className="text-coolslate flex-shrink-0">{l}</span>

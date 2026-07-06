@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, CheckCircle, AlertCircle, Info, AlertTriangle, Loader2, Search, ChevronUp, ChevronDown, Check } from 'lucide-react';
 import { cn } from '../../utils/formatters';
@@ -354,6 +355,63 @@ export function ProgressBar({ value, max = 100, color = 'bg-carbon', size = 'md'
   );
 }
 
+// ─── Tooltip ──────────────────────────────────────────────────────────────────
+// Portals to document.body so it can never be clipped by an ancestor's
+// `overflow-hidden`/`overflow-x-auto` (e.g. a scrollable table) and never
+// affects surrounding layout. Always shows on hover, regardless of whether
+// the wrapped content happens to be truncated.
+interface TooltipProps {
+  content: React.ReactNode;
+  children: React.ReactElement;
+  maxWidth?: number;
+}
+
+export function Tooltip({ content, children, maxWidth = 300 }: TooltipProps) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0, flip: false });
+
+  const handleEnter = () => {
+    const el = wrapperRef.current?.firstElementChild as HTMLElement | null;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const flip = rect.top < 100;
+    setPos({ top: flip ? rect.bottom + 10 : rect.top - 10, left: rect.left + rect.width / 2, flip });
+    setOpen(true);
+  };
+
+  return (
+    <div ref={wrapperRef} className="min-w-0" onMouseEnter={handleEnter} onMouseLeave={() => setOpen(false)}>
+      {children}
+      {open && createPortal(
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: pos.flip ? -4 : 4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ duration: 0.13, ease: 'easeOut' }}
+            style={{
+              position: 'fixed', top: pos.top, left: pos.left,
+              transform: `translate(-50%, ${pos.flip ? '0' : '-100%'})`,
+              maxWidth, zIndex: 9999,
+            }}
+            className="pointer-events-none"
+          >
+            <div className="bg-carbon dark:bg-carbon-800 text-white text-xs leading-relaxed font-medium rounded-xl shadow-modal px-3.5 py-2.5 border border-white/10 whitespace-normal break-words">
+              {content}
+            </div>
+            <div className={cn(
+              'absolute left-1/2 -translate-x-1/2 w-2.5 h-2.5 bg-carbon dark:bg-carbon-800 rotate-45',
+              pos.flip ? '-top-1' : '-bottom-1'
+            )} />
+          </motion.div>
+        </AnimatePresence>,
+        document.body
+      )}
+    </div>
+  );
+}
+
 // ─── Step Indicator ───────────────────────────────────────────────────────────
 export function StepIndicator({ steps, current }: { steps: string[]; current: number }) {
   return (
@@ -401,8 +459,6 @@ export function SPDot({ color, size = 10 }: { color: string; size?: number }) {
 }
 
 // ─── Multi-Select ─────────────────────────────────────────────────────────────
-import { useRef } from 'react';
-
 export interface MultiSelectOption {
   id: string;
   label: string;
