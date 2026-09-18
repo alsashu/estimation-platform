@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import * as proj from '../controllers/projects.controller';
+import { setProjectParametricConfig } from '../controllers/parametricMaster.controller';
 import { authenticate } from '../middleware/authenticate';
 import { authorize, authorizeAny } from '../middleware/authorize';
 
@@ -14,5 +15,6 @@ router.put   ('/:id',                      authorize('project.update'), proj.upd
 router.delete('/:id',                      authorize('project.delete'), proj.deleteProject);
 router.post  ('/:id/users',                authorize('project.assign'), proj.assignUsers);
 router.delete('/:id/users/:userId',        authorize('project.assign'), proj.removeUser);
+router.patch ('/:id/parametric-config',    authorize('parametric.master.write'), setProjectParametricConfig);
 
 export default router;

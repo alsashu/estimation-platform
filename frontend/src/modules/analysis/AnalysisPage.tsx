@@ -37,7 +37,7 @@ export default function AnalysisPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-display font-bold text-carbon dark:text-white flex items-center gap-2">
-            <BarChart3 size={22} /> Analytics & Reports
+            <BarChart3 size={22} /> Analytics & Reports <Badge variant="success">SP</Badge>
           </h1>
           <p className="text-sm text-coolslate mt-0.5">Estimation accuracy and performance analysis</p>
         </div>

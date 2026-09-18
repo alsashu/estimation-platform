@@ -45,3 +45,10 @@ export const COMPETENCY_COLORS: Record<string, string> = {
 };
 
 export const CHART_COLORS = ['#1E3246','#19AA6E','#9B875F','#DC3223','#4B5A69','#73CDAA','#AFA082','#E15A50'];
+
+export const PARAMETRIC_SIZE_COLORS: Record<string, string> = {
+  'Small': '#19AA6E',
+  'Medium': '#9B875F',
+  'Large': '#E15A50',
+  'NA':    '#788291',
+};

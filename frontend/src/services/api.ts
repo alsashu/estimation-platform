@@ -5,6 +5,10 @@ import type {
   ComplexityDefinition, RiskDefinition, Notification,
   CalculationResult, PaginatedResponse, AnalysisSummary,
   ComplexityBreakdown, SPBandSummary, ScatterPoint, TrendPoint,
+  ParametricAverageConfig, ParametricExpertConfig, ParametricEstimation,
+  ParametricCalculationResult, ParametricSize,
+  ParametricAnalysisSummary, ParametricSizeDistribution, ParametricWorkGroupBreakdown,
+  ParametricConfigBreakdown, ParametricTrendPoint,
 } from '../types';
 import { useConnectionStore, useSyncQueueStore } from '../store';
 import { useAuthStore } from '../store/authStore';
@@ -180,6 +184,10 @@ export interface ProjectRecord {
   id: string; name: string; code?: string; description?: string;
   status: string; created_at: string; user_count?: number; estimation_count?: number;
   users?: { id: string; name: string; email: string; username: string }[];
+  parametric_average_config_id?: string | null;
+  parametric_expert_config_id?: string | null;
+  parametric_average_config_name?: string | null;
+  parametric_expert_config_name?: string | null;
 }
 
 export const projectsApi = {
@@ -308,6 +316,78 @@ export const masterApi = {
     api.get<{ success: boolean; data: ComplexityDefinition[] }>('/definitions/complexity').then(r => r.data.data!),
   getRiskDefs: () =>
     api.get<{ success: boolean; data: RiskDefinition[] }>('/definitions/risk').then(r => r.data.data!),
+};
+
+// ─── Parametric Estimation: Master Data ──────────────────────────────────────────
+export interface ParametricInputs {
+  middleware_inputs: ParametricSize;
+  application: ParametricSize;
+  system_configuration: ParametricSize;
+  data_and_control_flow: ParametricSize;
+  use_case: ParametricSize;
+  team_efficiency: number;
+}
+
+export const parametricMasterApi = {
+  getAverageConfigs: () =>
+    api.get<{ success: boolean; data: ParametricAverageConfig[] }>('/parametric/average-configs').then(r => r.data.data!),
+  createAverageConfig: (body: { name: string; description?: string; small: number; medium: number; large: number }) =>
+    api.post<{ success: boolean; data: ParametricAverageConfig }>('/parametric/average-configs', body).then(r => r.data.data!),
+  updateAverageConfig: (id: string, body: Partial<{ name: string; description: string; small: number; medium: number; large: number; is_active: boolean }>) =>
+    api.put<{ success: boolean; data: ParametricAverageConfig }>(`/parametric/average-configs/${id}`, body).then(r => r.data.data!),
+  setDefaultAverageConfig: (id: string) =>
+    api.patch(`/parametric/average-configs/${id}/default`).then(r => r.data),
+  deleteAverageConfig: (id: string) =>
+    api.delete(`/parametric/average-configs/${id}`).then(r => r.data),
+
+  getExpertConfigs: () =>
+    api.get<{ success: boolean; data: ParametricExpertConfig[] }>('/parametric/expert-configs').then(r => r.data.data!),
+  createExpertConfig: (body: { name: string; description?: string; values: ParametricExpertConfig['values'] }) =>
+    api.post<{ success: boolean; data: ParametricExpertConfig }>('/parametric/expert-configs', body).then(r => r.data.data!),
+  updateExpertConfig: (id: string, body: Partial<{ name: string; description: string; is_active: boolean; values: ParametricExpertConfig['values'] }>) =>
+    api.put<{ success: boolean; data: ParametricExpertConfig }>(`/parametric/expert-configs/${id}`, body).then(r => r.data.data!),
+  setDefaultExpertConfig: (id: string) =>
+    api.patch(`/parametric/expert-configs/${id}/default`).then(r => r.data),
+  deleteExpertConfig: (id: string) =>
+    api.delete(`/parametric/expert-configs/${id}`).then(r => r.data),
+
+  setProjectConfig: (projectId: string, body: { parametric_average_config_id?: string | null; parametric_expert_config_id?: string | null }) =>
+    api.patch(`/projects/${projectId}/parametric-config`, body).then(r => r.data),
+};
+
+// ─── Parametric Estimation ────────────────────────────────────────────────────────
+export const parametricEstimationsApi = {
+  calculate: (body: ParametricInputs & { project_id?: string }) =>
+    api.post<{ success: boolean; data: ParametricCalculationResult }>('/parametric-estimations/calculate', body).then(r => r.data.data!),
+
+  getAll: (params?: Record<string, unknown>) =>
+    api.get<PaginatedResponse<ParametricEstimation>>('/parametric-estimations', { params }).then(r => r.data),
+
+  getById: (id: string) =>
+    api.get<{ success: boolean; data: ParametricEstimation }>(`/parametric-estimations/${id}`).then(r => r.data.data!),
+
+  create: (body: ParametricInputs & {
+    task_title: string; project_id?: string; project_name?: string; description?: string; work_group?: string;
+  }) => api.post<{ success: boolean; data: ParametricEstimation }>('/parametric-estimations', body).then(r => r.data.data!),
+
+  batchImport: (rows: (ParametricInputs & {
+    task_title: string; project_id?: string; project_name?: string; description?: string; work_group?: string;
+  })[]) =>
+    api.post<{ success: boolean; created: number; errors: { row: number; error: string }[] }>('/parametric-estimations/import', { rows }).then(r => r.data),
+};
+
+// ─── Parametric Analysis ──────────────────────────────────────────────────────────
+export const parametricAnalysisApi = {
+  getSummary: (params?: Record<string, unknown>) =>
+    api.get<{ success: boolean; data: ParametricAnalysisSummary }>('/parametric-analysis/summary', { params }).then(r => r.data.data!),
+  getSizeDistribution: (params?: Record<string, unknown>) =>
+    api.get<{ success: boolean; data: ParametricSizeDistribution[] }>('/parametric-analysis/size-distribution', { params }).then(r => r.data.data!),
+  getByWorkGroup: (params?: Record<string, unknown>) =>
+    api.get<{ success: boolean; data: ParametricWorkGroupBreakdown[] }>('/parametric-analysis/work-group', { params }).then(r => r.data.data!),
+  getByConfig: (params?: Record<string, unknown>) =>
+    api.get<{ success: boolean; data: ParametricConfigBreakdown[] }>('/parametric-analysis/config', { params }).then(r => r.data.data!),
+  getTrend: (params?: Record<string, unknown>) =>
+    api.get<{ success: boolean; data: ParametricTrendPoint[] }>('/parametric-analysis/trend', { params }).then(r => r.data.data!),
 };
 
 // ─── Analysis ─────────────────────────────────────────────────────────────────

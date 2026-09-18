@@ -192,6 +192,131 @@ export interface TrendPoint {
   avg_accuracy: number;
 }
 
+// ─── Parametric Estimation ──────────────────────────────────────────────────────
+export type ParametricSize = 'Small' | 'Medium' | 'Large' | 'NA';
+export type TeamEfficiency = 1 | 0.8 | 0.5;
+
+export interface ParametricFieldSet {
+  middleware_inputs: number;
+  application: number;
+  system_configuration: number;
+  data_and_control_flow: number;
+  use_case: number;
+}
+
+export interface ParametricAverageConfig {
+  id: string;
+  name: string;
+  description?: string;
+  small: number;
+  medium: number;
+  large: number;
+  is_default: boolean;
+  is_active: boolean;
+  project_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ParametricExpertConfig {
+  id: string;
+  name: string;
+  description?: string;
+  is_default: boolean;
+  is_active: boolean;
+  project_count?: number;
+  values: { Small: ParametricFieldSet; Medium: ParametricFieldSet; Large: ParametricFieldSet };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ParametricBreakdownField {
+  field: keyof ParametricFieldSet;
+  label: string;
+  size: ParametricSize;
+  detailed_value: number;
+  average_value: number;
+}
+
+export interface ParametricCalculationResult {
+  multiplier: number;
+  detailed_estimation: number;
+  average_estimation: number;
+  final_estimation: number;
+  final_basis: 'detailed' | 'average';
+  breakdown: ParametricBreakdownField[];
+  expert_config: { id: string; name: string; values: ParametricExpertConfig['values'] };
+  average_config: { id: string; name: string; small: number; medium: number; large: number };
+}
+
+export interface ParametricEstimation {
+  id: string;
+  task_title: string;
+  project_id?: string;
+  project_name?: string;
+  description?: string;
+  work_group?: string;
+  middleware_inputs: ParametricSize;
+  application: ParametricSize;
+  system_configuration: ParametricSize;
+  data_and_control_flow: ParametricSize;
+  use_case: ParametricSize;
+  team_efficiency: TeamEfficiency;
+  multiplier: number;
+  detailed_estimation: number;
+  average_estimation: number;
+  final_estimation: number;
+  expert_config_id?: string;
+  expert_config_name?: string;
+  expert_config_snapshot?: ParametricExpertConfig['values'];
+  average_config_id?: string;
+  average_config_name?: string;
+  average_config_snapshot?: { small: number; medium: number; large: number };
+  breakdown?: ParametricBreakdownField[];
+  source: 'manual' | 'excel_import';
+  created_by?: string;
+  created_at: string;
+  updated_by?: string;
+  updated_at: string;
+}
+
+export interface ParametricAnalysisSummary {
+  total_estimations: number;
+  avg_detailed_estimation: number;
+  avg_average_estimation: number;
+  avg_final_estimation: number;
+  avg_team_efficiency: number;
+  detailed_basis_pct: number;
+  average_basis_pct: number;
+  import_count: number;
+}
+
+export interface ParametricSizeDistribution {
+  field: string;
+  Small: number;
+  Medium: number;
+  Large: number;
+  NA: number;
+}
+
+export interface ParametricWorkGroupBreakdown {
+  work_group: string;
+  count: number;
+  avg_final_estimation: number;
+}
+
+export interface ParametricConfigBreakdown {
+  expert_config_name: string;
+  count: number;
+  avg_final_estimation: number;
+}
+
+export interface ParametricTrendPoint {
+  date: string;
+  total: number;
+  avg_final_estimation: number;
+}
+
 export interface ToastMessage {
   id: string;
   type: 'success' | 'error' | 'warning' | 'info';

@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: estimation_user
       POSTGRES_PASSWORD: estimation_pass
     ports:
-      - "5432:5432"
+      - "5435:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 

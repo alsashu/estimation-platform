@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Calculator, History, BarChart3, Database,
   BookOpen, Settings, ChevronLeft, ChevronRight, Layers, Target, Users, Menu,
-  Activity, HeartPulse, FolderOpen, Shield, UserCheck, Bell,
+  Activity, HeartPulse, FolderOpen, Shield, UserCheck, Bell, Sigma,
 } from 'lucide-react';
 import { useSidebarStore, useConnectionStore } from '../../store';
 import { useAuthStore } from '../../store/authStore';
@@ -29,21 +29,24 @@ export function Sidebar() {
     {
       label: 'Overview',
       items: [
-        { to: '/', icon: LayoutDashboard, label: 'Dashboard', show: true },
+        { to: '/',                     icon: LayoutDashboard, label: 'Dashboard SP', show: true },
+        { to: '/parametric-dashboard', icon: Sigma,           label: 'Dashboard PE', show: hasPermission('parametric.create') || hasPermission('parametric.read') },
       ],
     },
     {
       label: 'Estimation Methods',
       items: [
         { to: '/estimate',               icon: Calculator,       label: 'Storypoint Estimation',  show: hasPermission('estimation.create') || hasPermission('estimation.read') },
-        { to: '/parametric-estimation',  icon: LayoutDashboard,  label: 'Parametric Estimation',  show: hasPermission('estimation.create') || hasPermission('estimation.read') },
+        { to: '/parametric-estimation',  icon: Sigma,            label: 'Parametric Estimation',  show: hasPermission('parametric.create') || hasPermission('parametric.read') },
       ],
     },
     {
       label: 'Records',
       items: [
-        { to: '/history',   icon: History,   label: 'Historical Data', show: hasPermission('estimation.read') },
-        { to: '/analysis',  icon: BarChart3,  label: 'Analytics',       show: hasPermission('estimation.read') },
+        { to: '/history',             icon: History,   label: 'Historical Data SP', show: hasPermission('estimation.read') },
+        { to: '/parametric-history',  icon: History,   label: 'Historical Data PE', show: hasPermission('parametric.read') },
+        { to: '/analysis',            icon: BarChart3, label: 'Analytics SP',       show: hasPermission('estimation.read') },
+        { to: '/parametric-analysis', icon: BarChart3, label: 'Analytics PE',       show: hasPermission('parametric.read') },
       ],
     },
     {
@@ -52,6 +55,7 @@ export function Sidebar() {
         { to: '/master/story-points',  icon: Target,  label: 'Story Points',    show: hasPermission('master.read') },
         { to: '/master/effort',        icon: Layers,  label: 'Effort Estimates', show: hasPermission('master.read') },
         { to: '/master/competency',    icon: Users,   label: 'Competency',       show: hasPermission('master.read') },
+        { to: '/master/parametric',    icon: Sigma,   label: 'Parametric Data',  show: hasPermission('parametric.master.read') },
       ],
     },
     {

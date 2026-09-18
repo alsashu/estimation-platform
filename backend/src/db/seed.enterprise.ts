@@ -26,6 +26,12 @@ const PERMISSIONS = [
   // Master data
   { name: 'master.read',           module: 'master',       desc: 'Read master data' },
   { name: 'master.write',          module: 'master',       desc: 'Create/update/delete master data' },
+  // Parametric estimation
+  { name: 'parametric.create',        module: 'parametric', desc: 'Create parametric estimations' },
+  { name: 'parametric.read',          module: 'parametric', desc: 'Read parametric estimations' },
+  { name: 'parametric.import',        module: 'parametric', desc: 'Bulk import parametric estimations via Excel' },
+  { name: 'parametric.master.read',   module: 'parametric', desc: 'Read parametric master data (Average / Expert Judgement)' },
+  { name: 'parametric.master.write',  module: 'parametric', desc: 'Create/update/delete parametric master data' },
   // Roles & Permissions
   { name: 'role.read',             module: 'role',         desc: 'Read roles' },
   { name: 'role.manage',           module: 'role',         desc: 'Create/update/delete roles' },
@@ -61,11 +67,15 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'role.read',
     'permission.read',
     'registration.approve',
+    'parametric.create', 'parametric.read', 'parametric.import',
+    'parametric.master.read', 'parametric.master.write',
   ],
   'User': [
     'estimation.create', 'estimation.read', 'estimation.update',
     'project.read',
     'master.read',
+    'parametric.create', 'parametric.read', 'parametric.import',
+    'parametric.master.read',
   ],
 };
 

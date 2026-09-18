@@ -3,6 +3,9 @@ import * as sp from '../controllers/masterData.controller';
 import * as est from '../controllers/estimations.controller';
 import * as analysis from '../controllers/analysis.controller';
 import * as auditLogs from '../controllers/auditLogs.controller';
+import * as pm from '../controllers/parametricMaster.controller';
+import * as pe from '../controllers/parametricEstimations.controller';
+import * as pa from '../controllers/parametricAnalysis.controller';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
 
@@ -43,12 +46,40 @@ router.put   ('/estimations/:id',        authorize('estimation.update'), est.upd
 router.patch ('/estimations/:id/actuals', authorize('estimation.update'), est.recordActuals);
 router.delete('/estimations/:id',        authorize('estimation.delete'), est.remove);
 
+// ─── Parametric Estimation: Master Data ─────────────────────────────────────────
+router.get   ('/parametric/average-configs',           authorize('parametric.master.read'),  pm.getAllAverageConfigs);
+router.post  ('/parametric/average-configs',           authorize('parametric.master.write'), pm.createAverageConfig);
+router.put   ('/parametric/average-configs/:id',       authorize('parametric.master.write'), pm.updateAverageConfig);
+router.patch ('/parametric/average-configs/:id/default', authorize('parametric.master.write'), pm.setDefaultAverageConfig);
+router.delete('/parametric/average-configs/:id',       authorize('parametric.master.write'), pm.deleteAverageConfig);
+
+router.get   ('/parametric/expert-configs',            authorize('parametric.master.read'),  pm.getAllExpertConfigs);
+router.get   ('/parametric/expert-configs/:id',        authorize('parametric.master.read'),  pm.getExpertConfig);
+router.post  ('/parametric/expert-configs',            authorize('parametric.master.write'), pm.createExpertConfig);
+router.put   ('/parametric/expert-configs/:id',        authorize('parametric.master.write'), pm.updateExpertConfig);
+router.patch ('/parametric/expert-configs/:id/default', authorize('parametric.master.write'), pm.setDefaultExpertConfig);
+router.delete('/parametric/expert-configs/:id',        authorize('parametric.master.write'), pm.deleteExpertConfig);
+
+// ─── Parametric Estimation ───────────────────────────────────────────────────────
+router.post  ('/parametric-estimations/calculate', authorize('parametric.read'),   pe.calculatePreview);
+router.get   ('/parametric-estimations',           authorize('parametric.read'),   pe.getAll);
+router.post  ('/parametric-estimations',           authorize('parametric.create'), pe.create);
+router.post  ('/parametric-estimations/import',    authorize('parametric.import'), pe.batchImport);
+router.get   ('/parametric-estimations/:id',       authorize('parametric.read'),   pe.getById);
+
 // ─── Analysis ────────────────────────────────────────────────────────────────
 router.get('/analysis/summary',     authorize('estimation.read'), analysis.getSummary);
 router.get('/analysis/complexity',  authorize('estimation.read'), analysis.getByComplexity);
 router.get('/analysis/sp-bands',    authorize('estimation.read'), analysis.getSPBandSummary);
 router.get('/analysis/scatter',     authorize('estimation.read'), analysis.getScatterData);
 router.get('/analysis/trend',       authorize('estimation.read'), analysis.getTrend);
+
+// ─── Parametric Analysis ──────────────────────────────────────────────────────
+router.get('/parametric-analysis/summary',           authorize('parametric.read'), pa.getSummary);
+router.get('/parametric-analysis/size-distribution',  authorize('parametric.read'), pa.getSizeDistribution);
+router.get('/parametric-analysis/work-group',         authorize('parametric.read'), pa.getByWorkGroup);
+router.get('/parametric-analysis/config',             authorize('parametric.read'), pa.getByConfig);
+router.get('/parametric-analysis/trend',              authorize('parametric.read'), pa.getTrend);
 
 // ─── Notifications (user-scoped) ─────────────────────────────────────────────
 router.get  ('/notifications',              sp.getNotifications);

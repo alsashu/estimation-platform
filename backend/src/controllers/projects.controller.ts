@@ -30,13 +30,18 @@ export async function listProjects(req: Request, res: Response): Promise<void> {
 
   const data = await query(
     `SELECT p.id, p.name, p.code, p.description, p.status, p.created_at,
+            p.parametric_average_config_id, p.parametric_expert_config_id,
+            ac.name AS parametric_average_config_name,
+            ec.name AS parametric_expert_config_name,
             COUNT(DISTINCT pu.user_id)::int AS user_count,
             COUNT(DISTINCT e.id)::int AS estimation_count
      FROM projects p
      LEFT JOIN project_users pu ON pu.project_id = p.id
      LEFT JOIN estimations e ON e.project_id = p.id
+     LEFT JOIN parametric_average_configs ac ON ac.id = p.parametric_average_config_id
+     LEFT JOIN parametric_expert_configs ec ON ec.id = p.parametric_expert_config_id
      ${where}
-     GROUP BY p.id
+     GROUP BY p.id, ac.name, ec.name
      ORDER BY p.name
      LIMIT $${i} OFFSET $${i + 1}`,
     [...params, Number(limit), offset]

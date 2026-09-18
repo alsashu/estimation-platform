@@ -353,7 +353,7 @@ export default function HistoricalData() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-display font-bold text-carbon dark:text-white flex items-center gap-2">
-            <History size={22} /> Historical Data
+            <History size={22} /> Historical Data <Badge variant="success">SP</Badge>
           </h1>
           <p className="text-sm text-coolslate mt-0.5">{total} estimations total</p>
         </div>

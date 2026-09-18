@@ -2,6 +2,8 @@ import { pool } from '../config/database';
 import { seedData } from './seed';
 import { runEnterpriseMigration } from './migrate';
 import { seedEnterpriseData } from './seed.enterprise';
+import { runParametricMigration } from './migrate.parametric';
+import { seedParametricData } from './seed.parametric';
 
 const schema = `
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -202,6 +204,10 @@ export async function initDatabase(): Promise<void> {
 
     // Enterprise seed (idempotent — uses ON CONFLICT DO NOTHING)
     await seedEnterpriseData(client);
+
+    // Parametric estimation migration + seed (idempotent)
+    await runParametricMigration(client);
+    await seedParametricData(client);
 
   } finally {
     client.release();

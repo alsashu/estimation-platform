@@ -15,7 +15,7 @@ function PageHeader({ onNewEstimate }: { onNewEstimate: () => void }) {
     <div className="flex items-center justify-between mb-6">
       <div>
         <h1 className="text-2xl font-display font-bold text-carbon dark:text-white flex items-center gap-2">
-          <LayoutDashboard size={22} className="text-carbon dark:text-lgrayblue" /> Dashboard
+          <LayoutDashboard size={22} className="text-carbon dark:text-lgrayblue" /> Dashboard <Badge variant="success">SP</Badge>
         </h1>
         <p className="text-sm text-coolslate mt-0.5">Overview of estimation activity and performance</p>
       </div>
