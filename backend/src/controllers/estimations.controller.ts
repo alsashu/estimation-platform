@@ -1,13 +1,17 @@
 import { Request, Response } from 'express';
 import { query, queryOne } from '../config/database';
 import { runFullEstimation } from '../services/estimationEngine';
+import {
+  applyHierarchyScope, assertTaskAccess, createHierarchyValidator, hasHierarchyFields,
+  HierarchyError, taskHierarchyFields, toHierarchyInput, validateTaskHierarchy,
+} from '../services/hierarchy.service';
 import { z } from 'zod';
 
 const createSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   project_name: z.string().optional(),
-  project_id: z.string().uuid().optional(),
+  ...taskHierarchyFields,
   complexity: z.enum(['Low', 'Medium', 'High', 'Very High', 'Unmanageable']),
   risk: z.enum(['Low', 'Medium', 'High', 'Very High', 'Unknown']),
   competency: z.enum(['Emerging', 'Competent', 'Expert']),
@@ -24,43 +28,45 @@ const actualsSchema = z.object({
   message: 'Either estimated_hours or actual_hours must be provided',
 });
 
+/** Hierarchy display names joined onto every task row. */
+const SELECT_WITH_HIERARCHY = `
+  SELECT e.*, d.name AS department_name, p.name AS program_name, b.name AS baseline_name,
+         c.name AS component_name, s.name AS subcomponent_name
+    FROM estimations e
+    LEFT JOIN departments   d ON d.id = e.department_id
+    LEFT JOIN projects      p ON p.id = e.project_id
+    LEFT JOIN baselines     b ON b.id = e.baseline_id
+    LEFT JOIN components    c ON c.id = e.component_id
+    LEFT JOIN subcomponents s ON s.id = e.subcomponent_id`;
+
 export async function getAll(req: Request, res: Response): Promise<void> {
-  const { page = 1, limit = 20, status, complexity, risk, work_group, project_name, search, project_id } = req.query;
+  const { page = 1, limit = 20, status, complexity, risk, work_group, project_name, search } = req.query;
   const offset = (Number(page) - 1) * Number(limit);
 
   let where = 'WHERE 1=1';
-  const params: unknown[] = [];
+  let params: unknown[] = [];
   let i = 1;
 
-  // Project-based access scoping
-  if (req.user && req.user.projectIds !== '*') {
-    const ids = req.user.projectIds as string[];
-    if (ids.length === 0) {
-      res.json({ success: true, data: [], total: 0, page: Number(page), limit: Number(limit) });
-      return;
-    }
-    where += ` AND project_id = ANY($${i++}::uuid[])`;
-    params.push(ids);
-  }
+  // Department / Program / Baseline / Component / Subcomponent filters + access scoping
+  [where, params, i] = applyHierarchyScope(req, where, params, i, 'e.');
 
-  if (status)       { where += ` AND status = $${i++}`;        params.push(status); }
-  if (complexity)   { where += ` AND complexity = $${i++}`;    params.push(complexity); }
-  if (risk)         { where += ` AND risk = $${i++}`;          params.push(risk); }
-  if (work_group)   { where += ` AND work_group = $${i++}`;    params.push(work_group); }
-  if (project_id)   { where += ` AND project_id = $${i++}`;   params.push(project_id); }
-  if (project_name) { where += ` AND project_name ILIKE $${i++}`; params.push(`%${project_name}%`); }
+  if (status)       { where += ` AND e.status = $${i++}`;        params.push(status); }
+  if (complexity)   { where += ` AND e.complexity = $${i++}`;    params.push(complexity); }
+  if (risk)         { where += ` AND e.risk = $${i++}`;          params.push(risk); }
+  if (work_group)   { where += ` AND e.work_group = $${i++}`;    params.push(work_group); }
+  if (project_name) { where += ` AND e.project_name ILIKE $${i++}`; params.push(`%${project_name}%`); }
   if (search) {
-    where += ` AND (title ILIKE $${i} OR project_name ILIKE $${i + 1} OR description ILIKE $${i + 2} OR work_group ILIKE $${i + 3})`;
-    params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
-    i += 4;
+    where += ` AND (e.title ILIKE $${i} OR e.project_name ILIKE $${i} OR e.description ILIKE $${i} OR e.work_group ILIKE $${i})`;
+    params.push(`%${search}%`);
+    i += 1;
   }
 
   const data = await query(
-    `SELECT * FROM estimations ${where} ORDER BY created_at DESC LIMIT $${i} OFFSET $${i + 1}`,
+    `${SELECT_WITH_HIERARCHY} ${where} ORDER BY e.created_at DESC LIMIT $${i} OFFSET $${i + 1}`,
     [...params, Number(limit), offset]
   );
   const countRows = await query<{ count: string }>(
-    `SELECT COUNT(*) as count FROM estimations ${where}`, params
+    `SELECT COUNT(*) as count FROM estimations e ${where}`, params
   );
   const total = parseInt(countRows[0]?.count ?? '0');
 
@@ -68,8 +74,9 @@ export async function getAll(req: Request, res: Response): Promise<void> {
 }
 
 export async function getById(req: Request, res: Response): Promise<void> {
-  const row = await queryOne(`SELECT * FROM estimations WHERE id = $1`, [req.params.id]);
+  const row = await queryOne<{ project_id: string | null }>(`${SELECT_WITH_HIERARCHY} WHERE e.id = $1`, [req.params.id]);
   if (!row) { res.status(404).json({ success: false, error: 'Estimation not found' }); return; }
+  assertTaskAccess(req.user, row);
   res.json({ success: true, data: row });
 }
 
@@ -87,8 +94,18 @@ export async function calculate(req: Request, res: Response): Promise<void> {
   res.json({ success: true, data: result });
 }
 
+const INSERT_SQL = `INSERT INTO estimations
+   (title, description, project_name, project_id, department_id, baseline_id, component_id, subcomponent_id,
+    complexity, risk, competency, work_group,
+    story_points, initial_min_days, initial_max_days, initial_min_hours, initial_max_hours,
+    overhead_percent, revised_min_days, revised_max_days, revised_min_hours, revised_max_hours, notes, created_by)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+ RETURNING *`;
+
 export async function create(req: Request, res: Response): Promise<void> {
   const body = createSchema.parse(req.body);
+  const h = await validateTaskHierarchy(toHierarchyInput(body), req.user);
+
   const calc = await runFullEstimation(body.complexity, body.risk, body.competency);
   if (!calc) {
     res.status(404).json({ success: false, error: 'No story point configuration for this Complexity + Risk combination' });
@@ -97,25 +114,18 @@ export async function create(req: Request, res: Response): Promise<void> {
 
   const createdBy = req.user?.userId ?? null;
 
-  const [row] = await query(
-    `INSERT INTO estimations
-       (title, description, project_name, project_id, complexity, risk, competency, work_group,
-        story_points, initial_min_days, initial_max_days, initial_min_hours, initial_max_hours,
-        overhead_percent, revised_min_days, revised_max_days, revised_min_hours, revised_max_hours, notes, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
-     RETURNING *`,
-    [
-      body.title, body.description, body.project_name, body.project_id ?? null,
-      body.complexity, body.risk, body.competency, body.work_group,
-      calc.story_points,
-      calc.initial_min_days, calc.initial_max_days,
-      calc.initial_min_hours, calc.initial_max_hours,
-      calc.overhead_percent,
-      calc.revised_min_days, calc.revised_max_days,
-      calc.revised_min_hours, calc.revised_max_hours,
-      body.notes, createdBy,
-    ]
-  );
+  const [row] = await query(INSERT_SQL, [
+    body.title, body.description, h.program_name, h.program_id, h.department_id,
+    h.baseline_id, h.component_id, h.subcomponent_id,
+    body.complexity, body.risk, body.competency, body.work_group,
+    calc.story_points,
+    calc.initial_min_days, calc.initial_max_days,
+    calc.initial_min_hours, calc.initial_max_hours,
+    calc.overhead_percent,
+    calc.revised_min_days, calc.revised_max_days,
+    calc.revised_min_hours, calc.revised_max_hours,
+    body.notes, createdBy,
+  ]);
 
   // Create notification
   await query(
@@ -123,25 +133,54 @@ export async function create(req: Request, res: Response): Promise<void> {
     ['New Estimation Created', `"${body.title}" — ${calc.story_points} SP, ${calc.revised_min_hours.toFixed(1)}–${calc.revised_max_hours.toFixed(1)} hrs revised`]
   );
 
-  res.status(201).json({ success: true, data: row });
+  res.status(201).json({ success: true, data: { ...(row as object), ...h } });
 }
 
+const updateSchema = z.object({
+  title: z.string().min(1).optional(),
+  description: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  ...taskHierarchyFields,
+});
+
+/**
+ * Updates task details and/or moves the task within the hierarchy. When any hierarchy field is sent,
+ * the full Department/Program/Baseline (+ optional Component/Subcomponent) selection is re-validated.
+ * This is also how legacy "Unassigned" tasks are re-homed into the hierarchy.
+ */
 export async function update(req: Request, res: Response): Promise<void> {
-  const { title, description, project_name, notes } = req.body;
-  const row = await queryOne(
-    `UPDATE estimations SET title=$1, description=$2, project_name=$3, notes=$4 WHERE id=$5 RETURNING *`,
-    [title, description, project_name, notes, req.params.id]
-  );
-  if (!row) { res.status(404).json({ success: false, error: 'Estimation not found' }); return; }
+  const body = updateSchema.parse(req.body);
+  const existing = await queryOne<{ project_id: string | null }>(`SELECT project_id FROM estimations WHERE id = $1`, [req.params.id]);
+  if (!existing) { res.status(404).json({ success: false, error: 'Estimation not found' }); return; }
+  assertTaskAccess(req.user, existing);
+
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  let i = 1;
+  if (body.title !== undefined)       { sets.push(`title=$${i++}`);       vals.push(body.title); }
+  if (body.description !== undefined) { sets.push(`description=$${i++}`); vals.push(body.description); }
+  if (body.notes !== undefined)       { sets.push(`notes=$${i++}`);       vals.push(body.notes); }
+
+  if (hasHierarchyFields(body)) {
+    const h = await validateTaskHierarchy(toHierarchyInput(body), req.user);
+    sets.push(`department_id=$${i++}`, `project_id=$${i++}`, `project_name=$${i++}`, `baseline_id=$${i++}`, `component_id=$${i++}`, `subcomponent_id=$${i++}`);
+    vals.push(h.department_id, h.program_id, h.program_name, h.baseline_id, h.component_id, h.subcomponent_id);
+  }
+  if (sets.length === 0) throw new HierarchyError('Nothing to update');
+
+  vals.push(req.params.id);
+  await query(`UPDATE estimations SET ${sets.join(', ')} WHERE id=$${i}`, vals);
+  const row = await queryOne(`${SELECT_WITH_HIERARCHY} WHERE e.id = $1`, [req.params.id]);
   res.json({ success: true, data: row });
 }
 
 export async function recordActuals(req: Request, res: Response): Promise<void> {
   const body = actualsSchema.parse(req.body);
-  const est = await queryOne<{ estimated_hours: number | null; revised_min_hours: number; title: string }>(
-    `SELECT estimated_hours, revised_min_hours, title FROM estimations WHERE id = $1`, [req.params.id]
+  const est = await queryOne<{ estimated_hours: number | null; revised_min_hours: number; title: string; project_id: string | null }>(
+    `SELECT estimated_hours, revised_min_hours, title, project_id FROM estimations WHERE id = $1`, [req.params.id]
   );
   if (!est) { res.status(404).json({ success: false, error: 'Estimation not found' }); return; }
+  assertTaskAccess(req.user, est);
 
   // Phase 1: Save estimated_hours only — do not change status or compute metrics
   if (body.actual_hours == null) {
@@ -188,15 +227,17 @@ export async function recordActuals(req: Request, res: Response): Promise<void> 
 }
 
 export async function remove(req: Request, res: Response): Promise<void> {
-  const row = await queryOne(`DELETE FROM estimations WHERE id=$1 RETURNING id`, [req.params.id]);
-  if (!row) { res.status(404).json({ success: false, error: 'Estimation not found' }); return; }
+  const existing = await queryOne<{ project_id: string | null }>(`SELECT project_id FROM estimations WHERE id = $1`, [req.params.id]);
+  if (!existing) { res.status(404).json({ success: false, error: 'Estimation not found' }); return; }
+  assertTaskAccess(req.user, existing);
+  await query(`DELETE FROM estimations WHERE id=$1`, [req.params.id]);
   res.json({ success: true, message: 'Estimation deleted' });
 }
 
 const importRowSchema = z.object({
   title: z.string().min(1).max(255),
   project_name: z.string().optional(),
-  project_id: z.string().uuid().optional(),
+  ...taskHierarchyFields,
   description: z.string().optional(),
   complexity: z.enum(['Low', 'Medium', 'High', 'Very High', 'Unmanageable']),
   risk: z.enum(['Low', 'Medium', 'High', 'Very High', 'Unknown']),
@@ -206,40 +247,38 @@ const importRowSchema = z.object({
 });
 
 const batchImportSchema = z.object({
+  /** Default hierarchy applied to every row that does not carry its own (the import dialog's selection). */
+  hierarchy: z.object(taskHierarchyFields).optional(),
   rows: z.array(importRowSchema).min(1).max(500),
 });
 
 export async function batchImport(req: Request, res: Response): Promise<void> {
-  const { rows } = batchImportSchema.parse(req.body);
+  const { rows, hierarchy } = batchImportSchema.parse(req.body);
+  const validate = createHierarchyValidator(req.user);
   let created = 0;
   const errors: { row: number; error: string }[] = [];
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     try {
+      const h = await validate(toHierarchyInput(hasHierarchyFields(row) ? row : (hierarchy ?? {})));
       const calc = await runFullEstimation(row.complexity, row.risk, row.competency);
       if (!calc) {
         errors.push({ row: i + 1, error: 'No story point configuration for this Complexity + Risk combination' });
         continue;
       }
-      await query(
-        `INSERT INTO estimations
-           (title, description, project_name, project_id, complexity, risk, competency, work_group,
-            story_points, initial_min_days, initial_max_days, initial_min_hours, initial_max_hours,
-            overhead_percent, revised_min_days, revised_max_days, revised_min_hours, revised_max_hours, notes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
-        [
-          row.title, row.description ?? null, row.project_name ?? null, row.project_id ?? null,
-          row.complexity, row.risk, row.competency, row.work_group,
-          calc.story_points,
-          calc.initial_min_days, calc.initial_max_days,
-          calc.initial_min_hours, calc.initial_max_hours,
-          calc.overhead_percent,
-          calc.revised_min_days, calc.revised_max_days,
-          calc.revised_min_hours, calc.revised_max_hours,
-          row.notes ?? null,
-        ]
-      );
+      await query(INSERT_SQL, [
+        row.title, row.description ?? null, h.program_name, h.program_id, h.department_id,
+        h.baseline_id, h.component_id, h.subcomponent_id,
+        row.complexity, row.risk, row.competency, row.work_group,
+        calc.story_points,
+        calc.initial_min_days, calc.initial_max_days,
+        calc.initial_min_hours, calc.initial_max_hours,
+        calc.overhead_percent,
+        calc.revised_min_days, calc.revised_max_days,
+        calc.revised_min_hours, calc.revised_max_hours,
+        row.notes ?? null, req.user?.userId ?? null,
+      ]);
       created++;
     } catch (e) {
       errors.push({ row: i + 1, error: e instanceof Error ? e.message : 'Import failed' });

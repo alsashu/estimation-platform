@@ -2,9 +2,9 @@ import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  LayoutDashboard, Calculator, History, BarChart3, Database,
+  LayoutDashboard, Calculator, History, BarChart3, Database, Gauge,
   BookOpen, Settings, ChevronLeft, ChevronRight, Layers, Target, Users, Menu,
-  Activity, HeartPulse, FolderOpen, Shield, UserCheck, Bell, Sigma,
+  Activity, HeartPulse, FolderOpen, Shield, UserCheck, Bell, Sigma, Building2, GitBranch,
 } from 'lucide-react';
 import { useSidebarStore, useConnectionStore } from '../../store';
 import { useAuthStore } from '../../store/authStore';
@@ -15,7 +15,11 @@ import { cn } from '../../utils/formatters';
 export function Sidebar() {
   const { collapsed, toggle } = useSidebarStore();
   const { isOnline, toggle: toggleConnection } = useConnectionStore();
-  const { hasPermission } = useAuthStore();
+  const { hasPermission, hasModule } = useAuthStore();
+  // Module access (SP / PE) is separate from roles; permissions are already limited to the granted modules,
+  // the module check additionally hides a module everywhere the moment access is revoked.
+  const sp = hasModule('SP');
+  const pe = hasModule('PE');
   const location = useLocation();
 
   const { data: pendingCount } = useQuery({
@@ -29,40 +33,48 @@ export function Sidebar() {
     {
       label: 'Overview',
       items: [
-        { to: '/',                     icon: LayoutDashboard, label: 'Dashboard SP', show: true },
-        { to: '/parametric-dashboard', icon: Sigma,           label: 'Dashboard PE', show: hasPermission('parametric.create') || hasPermission('parametric.read') },
+        { to: '/',                     icon: LayoutDashboard, label: 'Dashboard SP', show: sp && hasPermission('estimation.read') },
+        { to: '/parametric-dashboard', icon: Sigma,           label: 'Dashboard PE', show: pe && hasPermission('parametric.read') },
+        { to: '/estimation-performance', icon: Gauge,         label: 'Estimation Performance', show: (sp && hasPermission('estimation.read')) || (pe && hasPermission('parametric.read')) },
       ],
     },
     {
       label: 'Estimation Methods',
       items: [
-        { to: '/estimate',               icon: Calculator,       label: 'Storypoint Estimation',  show: hasPermission('estimation.create') || hasPermission('estimation.read') },
-        { to: '/parametric-estimation',  icon: Sigma,            label: 'Parametric Estimation',  show: hasPermission('parametric.create') || hasPermission('parametric.read') },
+        { to: '/estimate',               icon: Calculator,       label: 'Storypoint Estimation',  show: sp && (hasPermission('estimation.create') || hasPermission('estimation.read')) },
+        { to: '/parametric-estimation',  icon: Sigma,            label: 'Parametric Estimation',  show: pe && (hasPermission('parametric.create') || hasPermission('parametric.read')) },
       ],
     },
     {
       label: 'Records',
       items: [
-        { to: '/history',             icon: History,   label: 'Historical Data SP', show: hasPermission('estimation.read') },
-        { to: '/parametric-history',  icon: History,   label: 'Historical Data PE', show: hasPermission('parametric.read') },
-        { to: '/analysis',            icon: BarChart3, label: 'Analytics SP',       show: hasPermission('estimation.read') },
-        { to: '/parametric-analysis', icon: BarChart3, label: 'Analytics PE',       show: hasPermission('parametric.read') },
+        { to: '/history',             icon: History,   label: 'Historical Data SP', show: sp && hasPermission('estimation.read') },
+        { to: '/parametric-history',  icon: History,   label: 'Historical Data PE', show: pe && hasPermission('parametric.read') },
+        { to: '/analysis',            icon: BarChart3, label: 'Analytics SP',       show: sp && hasPermission('estimation.read') },
+        { to: '/parametric-analysis', icon: BarChart3, label: 'Analytics PE',       show: pe && hasPermission('parametric.read') },
+      ],
+    },
+    {
+      label: 'Organisation',
+      items: [
+        { to: '/departments', icon: Building2,  label: 'Departments', show: hasPermission('department.read') },
+        { to: '/programs',    icon: FolderOpen, label: 'Programs',    show: hasPermission('project.read') },
+        { to: '/baselines',   icon: GitBranch,  label: 'Baselines',   show: hasPermission('baseline.read') },
       ],
     },
     {
       label: 'Master Data',
       items: [
-        { to: '/master/story-points',  icon: Target,  label: 'Story Points',    show: hasPermission('master.read') },
-        { to: '/master/effort',        icon: Layers,  label: 'Effort Estimates', show: hasPermission('master.read') },
-        { to: '/master/competency',    icon: Users,   label: 'Competency',       show: hasPermission('master.read') },
-        { to: '/master/parametric',    icon: Sigma,   label: 'Parametric Data',  show: hasPermission('parametric.master.read') },
+        { to: '/master/story-points',  icon: Target,  label: 'Story Points',    show: sp && hasPermission('master.read') },
+        { to: '/master/effort',        icon: Layers,  label: 'Effort Estimates', show: sp && hasPermission('master.read') },
+        { to: '/master/competency',    icon: Users,   label: 'Competency',       show: sp && hasPermission('master.read') },
+        { to: '/master/parametric',    icon: Sigma,   label: 'Parametric Data',  show: pe && hasPermission('parametric.master.read') },
       ],
     },
     {
       label: 'Administration',
       items: [
         { to: '/users',         icon: Users,      label: 'Users',              show: hasPermission('user.read'),             badge: undefined },
-        { to: '/projects',      icon: FolderOpen, label: 'Projects',           show: hasPermission('project.read'),          badge: undefined },
         { to: '/roles',         icon: Shield,     label: 'Roles & Permissions', show: hasPermission('role.read'),            badge: undefined },
         { to: '/registrations', icon: UserCheck,  label: 'Registrations',      show: hasPermission('registration.approve'), badge: pendingCount?.count ?? 0 },
       ],

@@ -5,6 +5,8 @@ import { query, queryOne } from '../config/database';
 import { hashPassword, comparePassword, validatePasswordPolicy, generateStrongPassword } from '../auth/password';
 import { signAccessToken, signRefreshToken, verifyRefreshToken, getRefreshExpiryDate } from '../auth/jwt';
 import { auditLog } from '../services/audit.service';
+import { computeAccess } from '../services/hierarchy.service';
+import { getEffectiveModules, filterPermissionsByModules } from '../services/estimationAccess.service';
 import { createNotification, createApprovalNotification, broadcastToAdmins } from '../services/notification.service';
 
 interface UserRow {
@@ -31,24 +33,22 @@ async function buildUserTokenPayload(userId: string) {
   );
 
   const isGSA = roles.some(r => r.name === 'Global Super Admin');
-  let projectIds: string[] | '*';
-
-  if (isGSA) {
-    projectIds = '*';
-  } else {
-    const projects = await query<{ project_id: string }>(
-      `SELECT project_id FROM project_users WHERE user_id = $1`, [userId]
-    );
-    projectIds = projects.map(p => p.project_id);
-  }
+  // Department + Program access (program access always respects its parent department)
+  const { departmentIds, projectIds } = await computeAccess(userId, isGSA);
+  const roleNames = roles.map(r => r.name);
+  // Estimation module access (SP / PE) is separate from roles; the token keeps the ROLE permissions and the
+  // module list, and middleware/authenticate filters permissions by the live modules on every request.
+  const modules = await getEffectiveModules(userId, roleNames);
 
   return {
     userId,
     email: user.email,
     username: user.username,
-    roles: roles.map(r => r.name),
+    roles: roleNames,
     permissions: perms.map(p => p.name),
     projectIds,
+    departmentIds,
+    modules,
   };
 }
 
@@ -126,8 +126,11 @@ export async function login(req: Request, res: Response): Promise<void> {
       username: user.username,
       email: user.email,
       roles: payload.roles,
-      permissions: payload.permissions,
+      // Effective permissions = role permissions limited to the granted estimation modules
+      permissions: filterPermissionsByModules(payload.permissions, payload.modules),
+      modules: payload.modules,
       projectIds: payload.projectIds,
+      departmentIds: payload.departmentIds,
     },
   });
 }
@@ -203,8 +206,11 @@ export async function me(req: Request, res: Response): Promise<void> {
     data: {
       ...user,
       roles: req.user.roles,
+      // Already filtered by the LIVE module access in middleware/authenticate
       permissions: req.user.permissions,
+      modules: req.user.modules ?? [],
       projectIds: req.user.projectIds,
+      departmentIds: req.user.departmentIds ?? [],
     },
   });
 }

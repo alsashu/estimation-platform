@@ -111,7 +111,8 @@ describe('authController.login', () => {
       .mockResolvedValueOnce([]) // reset attempts + last_login_at
       .mockResolvedValueOnce([{ name: 'User' }]) // roles
       .mockResolvedValueOnce([{ name: 'estimation.read' }]) // permissions
-      .mockResolvedValueOnce([{ project_id: 'p1' }]) // projects
+      .mockResolvedValueOnce([{ department_id: 'd1' }]) // user departments
+      .mockResolvedValueOnce([{ id: 'p1' }]) // accessible programs
       .mockResolvedValueOnce([]); // insert refresh token
     const req = { body: { email: 'a@b.com', password: 'Correct@1' }, ip: '127.0.0.1', headers: {} } as Request;
     const res = mockRes();

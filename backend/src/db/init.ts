@@ -4,6 +4,10 @@ import { runEnterpriseMigration } from './migrate';
 import { seedEnterpriseData } from './seed.enterprise';
 import { runParametricMigration } from './migrate.parametric';
 import { seedParametricData } from './seed.parametric';
+import { runHierarchyMigration } from './migrate.hierarchy';
+import { runParametricActualsMigration } from './migrate.parametricActuals';
+import { runEstimationAccessMigration, backfillEstimationAccess } from './migrate.estimationAccess';
+import { runPerformanceMigration } from './migrate.performance';
 
 const schema = `
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -189,8 +193,13 @@ export async function initDatabase(): Promise<void> {
     await client.query(schema);
     console.log('✅ Schema created/verified.');
 
-    // Enterprise migration (idempotent)
+    // Migrations (all idempotent) — run before any seed so seeds see the final schema
     await runEnterpriseMigration(client);
+    await runParametricMigration(client);
+    await runHierarchyMigration(client);
+    await runParametricActualsMigration(client);
+    await runEstimationAccessMigration(client);
+    await runPerformanceMigration(client);
 
     const { rows } = await client.query(`SELECT value FROM app_settings WHERE key = 'seeded'`);
     if (rows.length === 0) {
@@ -205,8 +214,10 @@ export async function initDatabase(): Promise<void> {
     // Enterprise seed (idempotent — uses ON CONFLICT DO NOTHING)
     await seedEnterpriseData(client);
 
-    // Parametric estimation migration + seed (idempotent)
-    await runParametricMigration(client);
+    // One-time SP / PE module access backfill for pre-existing (and freshly seeded) accounts
+    await backfillEstimationAccess(client);
+
+    // Parametric estimation seed (idempotent)
     await seedParametricData(client);
 
   } finally {

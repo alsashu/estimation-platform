@@ -3,7 +3,8 @@ import { useMutation } from '@tanstack/react-query';
 import { Download, UploadCloud, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, RotateCcw } from 'lucide-react';
 import { Card, Button } from '../../components/ui';
 import { parametricEstimationsApi } from '../../services/api';
-import { useProjectStore } from '../../store/projectStore';
+import { HierarchySelector, EMPTY_SELECTION, isHierarchyComplete, toHierarchyPayload } from '../../components/hierarchy/HierarchySelector';
+import type { HierarchySelection } from '../../types';
 import { cn } from '../../utils/formatters';
 import type { ParametricSize } from '../../types';
 
@@ -40,7 +41,6 @@ interface ParsedRow {
   rowNum: number;
   task_title: string;
   project_name: string;
-  project_id?: string;
   description: string;
   work_group: string;
   middleware_inputs: string;
@@ -69,7 +69,10 @@ export function ParametricExcelUpload({ onSuccess }: { onSuccess: () => void }) 
   const [result, setResult] = useState<ImportResult | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const { projects } = useProjectStore();
+  // Every imported row is created under this Department → Program → Baseline (→ Component → Subcomponent).
+  // The Program's parametric master-data mapping drives the calculation.
+  const [hierarchy, setHierarchy] = useState<HierarchySelection>(EMPTY_SELECTION);
+  const hierarchyOk = isHierarchyComplete(hierarchy);
 
   const reset = () => { setPhase('upload'); setRows([]); setFileName(''); setFileError(''); setResult(null); };
 
@@ -91,7 +94,7 @@ export function ParametricExcelUpload({ onSuccess }: { onSuccess: () => void }) 
       ['Column Guide'],
       ['Column', 'Required', 'Description'],
       ['Task Title', 'Yes', 'Short name of the task being estimated (max 255 characters).'],
-      ['Project', 'No', 'Exact name of an existing project. If it matches a project you have access to, that project’s master data configuration is used automatically. If left blank or unmatched, the default master data configuration is used.'],
+      ['Project', 'No', 'Informational only (kept for compatibility with older templates). Department, Program and Baseline — and optional Component / Subcomponent — are selected on the upload screen and applied to every row; the selected Program’s master data configuration is used for the calculation.'],
       ['Description', 'No', 'Free-text description of the task.'],
       ['Work Group', 'No', 'Free-text work group / team label, e.g. DEVELOPMENT, VALIDATION, SPECIFICATION.'],
       ['Middleware Inputs', 'Yes', 'One of: Small, Medium, Large, NA'],
@@ -199,10 +202,6 @@ export function ParametricExcelUpload({ onSuccess }: { onSuccess: () => void }) 
         if (!teRaw) errors.push('Team Efficiency is required');
         else if (te == null) errors.push(`Invalid Team Efficiency "${teRaw}" — valid values: 1, 0.8, 0.5`);
 
-        const matchedProject = project_name
-          ? projects.find(p => p.name.toLowerCase() === project_name.toLowerCase())
-          : undefined;
-
         const dedupeKey = [task_title, project_name, mwRaw, appRaw, scRaw, dcRaw, ucRaw, teRaw].join('|').toLowerCase();
         if (task_title && seen.has(dedupeKey)) {
           errors.push('Duplicate row — identical to an earlier row in this file');
@@ -211,7 +210,7 @@ export function ParametricExcelUpload({ onSuccess }: { onSuccess: () => void }) 
 
         parsed.push({
           rowNum: i + 1,
-          task_title, project_name, project_id: matchedProject?.id,
+          task_title, project_name,
           description, work_group,
           middleware_inputs: mw || mwRaw, application: app || appRaw, system_configuration: sc || scRaw,
           data_and_control_flow: dc || dcRaw, use_case: uc || ucRaw,
@@ -244,10 +243,9 @@ export function ParametricExcelUpload({ onSuccess }: { onSuccess: () => void }) 
     mutationFn: async () => {
       const valid = rows.filter(r => r.valid);
       return parametricEstimationsApi.batchImport(
+        toHierarchyPayload(hierarchy),
         valid.map(r => ({
           task_title: r.task_title,
-          project_id: r.project_id,
-          project_name: r.project_name || undefined,
           description: r.description || undefined,
           work_group: r.work_group || undefined,
           middleware_inputs: r.middleware_inputs as ParametricSize,
@@ -288,9 +286,18 @@ export function ParametricExcelUpload({ onSuccess }: { onSuccess: () => void }) 
         </div>
       </Card>
 
+      {/* Destination hierarchy */}
+      {(phase === 'upload' || phase === 'preview') && (
+        <Card padding="p-5">
+          <p className="text-sm font-semibold text-carbon dark:text-white">Step 2 — Choose where to import</p>
+          <p className="text-xs text-coolslate mt-0.5 mb-4">All rows are created under this Department, Program and Baseline. Component and Subcomponent are optional.</p>
+          <HierarchySelector value={hierarchy} onChange={setHierarchy} />
+        </Card>
+      )}
+
       {phase === 'upload' && (
         <Card padding="p-5">
-          <p className="text-sm font-semibold text-carbon dark:text-white mb-3">Step 2 — Upload Your File</p>
+          <p className="text-sm font-semibold text-carbon dark:text-white mb-3">Step 3 — Upload Your File</p>
           <div
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
@@ -351,7 +358,7 @@ export function ParametricExcelUpload({ onSuccess }: { onSuccess: () => void }) 
               <table className="w-full text-xs">
                 <thead className="sticky top-0 z-10 bg-lgrayblue/20 dark:bg-carbon-800/90">
                   <tr>
-                    {['Row', 'Task Title', 'Project', 'MWI', 'App', 'SysCfg', 'D&CF', 'UC', 'TE', 'Validation'].map(h => (
+                    {['Row', 'Task Title', 'Project (ignored)', 'MWI', 'App', 'SysCfg', 'D&CF', 'UC', 'TE', 'Validation'].map(h => (
                       <th key={h} className="px-3 py-2.5 text-left font-semibold text-coolslate uppercase tracking-wide whitespace-nowrap first:pl-4">{h}</th>
                     ))}
                   </tr>
@@ -401,7 +408,8 @@ export function ParametricExcelUpload({ onSuccess }: { onSuccess: () => void }) 
 
           <div className="flex justify-end gap-3">
             <Button variant="outline" onClick={reset}><RotateCcw size={14} /> Start Over</Button>
-            <Button onClick={() => importMutation.mutate()} disabled={validCount === 0} loading={importMutation.isPending}>
+            {!hierarchyOk && <span className="text-xs text-vibrant self-center">Select Department, Program and Baseline above first</span>}
+            <Button onClick={() => importMutation.mutate()} disabled={validCount === 0 || !hierarchyOk} loading={importMutation.isPending}>
               Import {validCount} record{validCount !== 1 ? 's' : ''}{errorCount > 0 ? ` (skip ${errorCount} invalid)` : ''}
             </Button>
           </div>

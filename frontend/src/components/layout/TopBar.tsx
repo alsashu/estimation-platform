@@ -10,16 +10,16 @@ import { useOffline } from '../../hooks/useOffline';
 import { useNotificationStore } from '../../store';
 import { useAuthStore } from '../../store/authStore';
 import { authApi } from '../../services/api';
-import { ProjectSelector } from './ProjectSelector';
+import { ContextSelector } from './ContextSelector';
 import { fmt, cn } from '../../utils/formatters';
 import { Badge } from '../ui';
 
 const BREADCRUMB_MAP: Record<string, string> = {
   '': 'Dashboard', 'estimate': 'Storypoint Estimation', 'parametric-estimation': 'Parametric Estimation',
-  'history': 'Historical Data', 'analysis': 'Analytics', 'master': 'Master Data',
+  'history': 'Historical Data SP', 'analysis': 'Analytics SP', 'parametric-history': 'Historical Data PE', 'parametric-analysis': 'Analytics PE', 'parametric-dashboard': 'Dashboard PE', 'estimation-performance': 'Estimation Performance', 'master': 'Master Data',
   'story-points': 'Story Points', 'effort': 'Effort Estimates', 'competency': 'Competency Levels',
   'docs': 'Documentation', 'settings': 'Settings', 'notifications': 'Notifications',
-  'users': 'User Management', 'projects': 'Projects', 'roles': 'Roles & Permissions',
+  'users': 'User Management', 'projects': 'Programs', 'programs': 'Programs', 'departments': 'Departments', 'baselines': 'Baselines', 'roles': 'Roles & Permissions',
   'registrations': 'Registration Requests', 'logs': 'Log Monitor', 'monitoring': 'Health',
 };
 
@@ -77,7 +77,7 @@ export function TopBar() {
   return (
     <header className="h-14 bg-white dark:bg-carbon-800 border-b border-lgrayblue/30 dark:border-slate-700 flex items-center px-5 gap-4 flex-shrink-0 z-10">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1 text-sm flex-1 min-w-0">
+      <nav className="hidden md:flex items-center gap-1 text-sm flex-1 min-w-0">
         {crumbs.map((c, i) => (
           <span key={c.to} className="flex items-center gap-1 min-w-0">
             {i > 0 && <ChevronRight size={13} className="text-coolslate flex-shrink-0" />}
@@ -89,8 +89,8 @@ export function TopBar() {
         ))}
       </nav>
 
-      {/* Project Selector */}
-      <ProjectSelector />
+      {/* Department + Program context (global filters) */}
+      <ContextSelector />
 
       {/* Right actions */}
       <div className="flex items-center gap-2">

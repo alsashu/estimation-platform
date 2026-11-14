@@ -3,7 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { History, Plus, Search, Filter, Download, Eye, Edit2, Trash2, CheckCircle, ClipboardList, Save, Upload } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { estimationsApi } from '../../services/api';
-import { useProjectStore } from '../../store/projectStore';
+import { HierarchyFilterBar, usePageHierarchyFilter } from '../../components/hierarchy/HierarchyFilterBar';
+import { HierarchyPath, ReassignHierarchyButton } from '../../components/hierarchy/TaskHierarchy';
+import { useAuthStore } from '../../store/authStore';
 import { ImportModal } from './ImportModal';
 import { Button, Card, Badge, Drawer, Modal, EmptyState, SearchInput, Skeleton, SPDot, ConfirmDialog, Tooltip } from '../../components/ui';
 import { useToastStore } from '../../store';
@@ -26,7 +28,11 @@ function EstimationRow({ est, onView, onDelete }: { est: Estimation; onView: (e:
             <Tooltip content={est.title}>
               <p className="text-sm font-medium text-carbon dark:text-white truncate max-w-[220px] cursor-default">{est.title}</p>
             </Tooltip>
-            <p className="text-xs text-coolslate">{est.project_name || '—'}</p>
+            <p className="text-xs text-coolslate truncate max-w-[260px]">
+              {est.project_id
+                ? [est.program_name ?? est.project_name, est.baseline_name, est.component_name, est.subcomponent_name].filter(Boolean).join(' › ')
+                : 'Unassigned (pre-hierarchy)'}
+            </p>
           </div>
         </div>
       </td>
@@ -214,7 +220,11 @@ function ActualsForm({ estimation, onSave, loading }: {
 
 const CSV_COLUMNS: { header: string; key: keyof Estimation | ((e: Estimation) => string | number | null | undefined) }[] = [
   { header: 'Title',               key: 'title' },
-  { header: 'Project',             key: 'project_name' },
+  { header: 'Department',          key: 'department_name' },
+  { header: 'Program',             key: e => e.program_name ?? e.project_name ?? '' },
+  { header: 'Baseline',            key: 'baseline_name' },
+  { header: 'Component',           key: 'component_name' },
+  { header: 'Subcomponent',        key: 'subcomponent_name' },
   { header: 'Complexity',          key: 'complexity' },
   { header: 'Risk',                key: 'risk' },
   { header: 'Competency',          key: 'competency' },
@@ -270,7 +280,9 @@ function downloadCsv(content: string, filename: string) {
 export default function HistoricalData() {
   const qc = useQueryClient();
   const { addToast } = useToastStore();
-  const { selectedProjectId } = useProjectStore();
+  // Department + Program from the header; Baseline → Component → Subcomponent from the page filter
+  const { filter, setFilter, params: scope } = usePageHierarchyFilter();
+  const canEdit = useAuthStore(s => s.hasPermission('estimation.update'));
   const [search, setSearch] = useState('');
   const [complexity, setComplexity] = useState('');
   const [risk, setRisk] = useState('');
@@ -288,7 +300,7 @@ export default function HistoricalData() {
     risk: risk || undefined,
     work_group: workGroup || undefined,
     status: status || undefined,
-    project_id: selectedProjectId ?? undefined,
+    ...scope,
   };
 
   const params = { ...filterParams, page, limit: 15 };
@@ -303,7 +315,7 @@ export default function HistoricalData() {
       }
       const csv = buildCsv(res.data);
       const date = new Date().toISOString().slice(0, 10);
-      const projectPart = selectedProjectId ? `-project` : '';
+      const projectPart = scope.programId ? `-program` : '';
       downloadCsv(csv, `estimations${projectPart}-${date}.csv`);
       addToast({ type: 'success', title: 'Export complete', message: `${res.data.length} records downloaded.` });
     } catch {
@@ -366,8 +378,11 @@ export default function HistoricalData() {
 
       {/* Filters */}
       <Card padding="p-4">
+        <div className="mb-3">
+          <HierarchyFilterBar value={filter} onChange={(f) => { setFilter(f); setPage(1); }} depth="subcomponent" />
+        </div>
         <div className="flex flex-wrap gap-3">
-          <div className="flex-1 min-w-48"><SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Search title or project…" /></div>
+          <div className="flex-1 min-w-48"><SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Search title or program…" /></div>
           {[
             { label: 'Complexity', value: complexity, options: COMPLEXITY_OPTIONS, set: setComplexity },
             { label: 'Risk', value: risk, options: RISK_OPTIONS, set: setRisk },
@@ -434,9 +449,14 @@ export default function HistoricalData() {
       </Card>
 
       {/* Detail Drawer */}
-      <Drawer isOpen={!!drawerEst} onClose={() => setDrawerEst(null)} title={drawerEst?.title || ''} subtitle={drawerEst?.project_name}>
+      <Drawer isOpen={!!drawerEst} onClose={() => setDrawerEst(null)} title={drawerEst?.title || ''} subtitle={drawerEst?.program_name ?? drawerEst?.project_name ?? 'Unassigned'}>
         {drawerEst && (
           <div className="p-5 space-y-5">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-coolslate uppercase tracking-wide">Hierarchy</p>
+              <HierarchyPath task={drawerEst} />
+              {canEdit && <ReassignHierarchyButton module="sp" task={drawerEst} onDone={() => setDrawerEst(null)} />}
+            </div>
             <div className="grid grid-cols-2 gap-3">
               {[
                 { l: 'Complexity', v: drawerEst.complexity },
@@ -529,7 +549,6 @@ export default function HistoricalData() {
         isOpen={importOpen}
         onClose={() => setImportOpen(false)}
         onSuccess={() => qc.invalidateQueries({ queryKey: ['estimations'] })}
-        projectId={selectedProjectId}
       />
 
       {/* Delete confirm */}

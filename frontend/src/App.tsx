@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
+import { ModuleRoute, HomeRoute, MasterIndexRoute, ModuleAccessDenied, AnyModuleRoute } from './components/auth/ModuleRoute';
 import LoginPage from './modules/auth/LoginPage';
 import RegisterPage from './modules/auth/RegisterPage';
 import ForgotPasswordPage from './modules/auth/ForgotPasswordPage';
@@ -22,8 +23,11 @@ import ParametricEstimationPage from './modules/parametric-estimation/Parametric
 import ParametricDashboard from './modules/parametric-estimation/ParametricDashboard';
 import ParametricHistoryPage from './modules/parametric-estimation/ParametricHistoryPage';
 import ParametricAnalysisPage from './modules/parametric-estimation/ParametricAnalysisPage';
+import EstimationPerformancePage from './modules/performance/EstimationPerformancePage';
 import UsersPage from './modules/users/UsersPage';
-import ProjectsPage from './modules/projects/ProjectsPage';
+import ProgramsPage from './modules/programs/ProgramsPage';
+import DepartmentsPage from './modules/departments/DepartmentsPage';
+import BaselinesPage from './modules/baselines/BaselinesPage';
 import RolesPage from './modules/roles/RolesPage';
 import RegistrationsPage from './modules/registrations/RegistrationsPage';
 
@@ -38,23 +42,28 @@ export default function App() {
 
       {/* Protected app routes */}
       <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
-        <Route index element={<Dashboard />} />
-        <Route path="parametric-dashboard" element={<ParametricDashboard />} />
-        <Route path="estimate" element={<EstimationWizard />} />
-        <Route path="parametric-estimation" element={<ParametricEstimationPage />} />
-        <Route path="history" element={<HistoricalData />} />
-        <Route path="parametric-history" element={<ParametricHistoryPage />} />
-        <Route path="analysis" element={<AnalysisPage />} />
-        <Route path="parametric-analysis" element={<ParametricAnalysisPage />} />
+        {/* Estimation modules: SP and PE pages each require that module (independent of the role) */}
+        <Route index element={<HomeRoute><Dashboard /></HomeRoute>} />
+        <Route path="parametric-dashboard" element={<ModuleRoute module="PE"><ParametricDashboard /></ModuleRoute>} />
+        <Route path="estimation-performance" element={<AnyModuleRoute><EstimationPerformancePage /></AnyModuleRoute>} />
+        <Route path="estimate" element={<ModuleRoute module="SP"><EstimationWizard /></ModuleRoute>} />
+        <Route path="parametric-estimation" element={<ModuleRoute module="PE"><ParametricEstimationPage /></ModuleRoute>} />
+        <Route path="history" element={<ModuleRoute module="SP"><HistoricalData /></ModuleRoute>} />
+        <Route path="parametric-history" element={<ModuleRoute module="PE"><ParametricHistoryPage /></ModuleRoute>} />
+        <Route path="analysis" element={<ModuleRoute module="SP"><AnalysisPage /></ModuleRoute>} />
+        <Route path="parametric-analysis" element={<ModuleRoute module="PE"><ParametricAnalysisPage /></ModuleRoute>} />
         <Route path="master">
-          <Route index element={<Navigate to="story-points" replace />} />
-          <Route path="story-points" element={<StoryPointsPage />} />
-          <Route path="effort" element={<EffortEstimatesPage />} />
-          <Route path="competency" element={<CompetencyPage />} />
+          <Route index element={<MasterIndexRoute />} />
+          <Route path="story-points" element={<ModuleRoute module="SP"><StoryPointsPage /></ModuleRoute>} />
+          <Route path="effort" element={<ModuleRoute module="SP"><EffortEstimatesPage /></ModuleRoute>} />
+          <Route path="competency" element={<ModuleRoute module="SP"><CompetencyPage /></ModuleRoute>} />
           <Route path="parametric" element={
-            <ProtectedRoute requiredPermission="parametric.master.read"><ParametricMasterPage /></ProtectedRoute>
+            <ModuleRoute module="PE">
+              <ProtectedRoute requiredPermission="parametric.master.read"><ParametricMasterPage /></ProtectedRoute>
+            </ModuleRoute>
           } />
         </Route>
+        <Route path="no-module-access" element={<ModuleAccessDenied />} />
         <Route path="docs" element={<DocsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
@@ -65,9 +74,18 @@ export default function App() {
         <Route path="users" element={
           <ProtectedRoute requiredPermission="user.read"><UsersPage /></ProtectedRoute>
         } />
-        <Route path="projects" element={
-          <ProtectedRoute requiredPermission="project.read"><ProjectsPage /></ProtectedRoute>
+        {/* Organisation hierarchy: Department → Program → Baseline (→ Component → Subcomponent) */}
+        <Route path="departments" element={
+          <ProtectedRoute requiredPermission="department.read"><DepartmentsPage /></ProtectedRoute>
         } />
+        <Route path="programs" element={
+          <ProtectedRoute requiredPermission="project.read"><ProgramsPage /></ProtectedRoute>
+        } />
+        <Route path="baselines" element={
+          <ProtectedRoute requiredPermission="baseline.read"><BaselinesPage /></ProtectedRoute>
+        } />
+        {/* Projects were renamed to Programs — keep old links working */}
+        <Route path="projects" element={<Navigate to="/programs" replace />} />
         <Route path="roles" element={
           <ProtectedRoute requiredPermission="role.read"><RolesPage /></ProtectedRoute>
         } />

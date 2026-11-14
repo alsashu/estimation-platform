@@ -1,16 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Calculator, ChevronRight, ChevronLeft, Zap, Info } from 'lucide-react';
 import { estimationsApi, masterApi } from '../../services/api';
-import { useProjectStore } from '../../store/projectStore';
+import { HierarchySelector, EMPTY_SELECTION, isHierarchyComplete, toHierarchyPayload } from '../../components/hierarchy/HierarchySelector';
 import { Button, Card, StepIndicator, Modal, SPDot } from '../../components/ui';
 import { useToastStore } from '../../store';
 import { fmt, cn } from '../../utils/formatters';
 import { SP_COLORS, COMPLEXITY_COLORS, RISK_COLORS, COMPETENCY_COLORS } from '../../config/theme';
-import type { ComplexityLevel, RiskLevel, CompetencyLevel, WorkGroup, CalculationResult } from '../../types';
+import type { ComplexityLevel, RiskLevel, CompetencyLevel, WorkGroup, CalculationResult, HierarchySelection } from '../../types';
 
 const COMPLEXITIES: ComplexityLevel[] = ['Low', 'Medium', 'High', 'Very High', 'Unmanageable'];
 const RISKS: RiskLevel[] = ['Low', 'Medium', 'High', 'Very High', 'Unknown'];
@@ -41,7 +41,6 @@ const COMPETENCY_DESC: Record<CompetencyLevel, string> = {
 
 interface FormData {
   title: string;
-  project_name: string;
   description: string;
   notes: string;
   complexity: ComplexityLevel | '';
@@ -104,20 +103,15 @@ function LivePreview({ calc, complexity, risk, competency }: { calc?: Calculatio
 export default function EstimationWizard() {
   const navigate = useNavigate();
   const { addToast } = useToastStore();
-  const { selectedProjectId, projects } = useProjectStore();
   const [step, setStep] = useState(0);
   const [showDocModal, setShowDocModal] = useState(false);
+  // Department → Program → Baseline (mandatory) → Component → Subcomponent (optional)
+  const [hierarchy, setHierarchy] = useState<HierarchySelection>(EMPTY_SELECTION);
+  const [hierarchyNames, setHierarchyNames] = useState<Record<string, string>>({});
+  const [triedNext, setTriedNext] = useState(false);
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
-    defaultValues: { title: '', project_name: '', description: '', notes: '', complexity: '', risk: '', competency: '', work_group: '' },
+    defaultValues: { title: '', description: '', notes: '', complexity: '', risk: '', competency: '', work_group: '' },
   });
-
-  // Auto-populate project name from selected project
-  useEffect(() => {
-    if (selectedProjectId) {
-      const proj = projects.find(p => p.id === selectedProjectId);
-      if (proj) setValue('project_name', proj.name);
-    }
-  }, [selectedProjectId, projects, setValue]);
 
   const complexity = watch('complexity');
   const risk = watch('risk');
@@ -145,17 +139,19 @@ export default function EstimationWizard() {
 
   const onSubmit = (data: FormData) => {
     if (!data.complexity || !data.risk || !data.competency || !data.work_group) return;
+    if (!isHierarchyComplete(hierarchy)) { setStep(0); setTriedNext(true); return; }
     mutation.mutate({
       ...data,
+      ...toHierarchyPayload(hierarchy),
       complexity: data.complexity,
       risk: data.risk,
       competency: data.competency,
       work_group: data.work_group,
-      project_id: selectedProjectId ?? undefined,
     });
   };
 
-  const canNext0 = !!complexity && !!risk && !!workGroup;
+  const hierarchyOk = isHierarchyComplete(hierarchy);
+  const canNext0 = !!complexity && !!risk && !!workGroup && hierarchyOk && !!watch('title');
   const canNext1 = !!competency;
 
   function RadioGroup<T extends string>({ options, value, onChange, colors, descriptions }: {
@@ -222,12 +218,6 @@ export default function EstimationWizard() {
                         {errors.title && <p className="text-xs text-vibrant mt-1">{errors.title.message}</p>}
                       </div>
                       <div>
-                        <label className="text-sm font-medium text-carbon dark:text-lgrayblue block mb-1">Project</label>
-                        <input {...register('project_name')} placeholder="e.g. Portal v3"
-                          className="w-full px-3 py-2.5 rounded-lg border border-lgrayblue dark:border-slate-600 bg-white dark:bg-carbon-800 text-sm text-carbon dark:text-white focus:outline-none focus:ring-2 focus:ring-carbon/20 focus:border-carbon transition-colors"
-                        />
-                      </div>
-                      <div>
                         <label className="text-sm font-medium text-carbon dark:text-lgrayblue block mb-1">Description</label>
                         <textarea {...register('description')} rows={2} placeholder="Brief description of the task…"
                           className="w-full px-3 py-2.5 rounded-lg border border-lgrayblue dark:border-slate-600 bg-white dark:bg-carbon-800 text-sm text-carbon dark:text-white focus:outline-none focus:ring-2 focus:ring-carbon/20 focus:border-carbon transition-colors resize-none"
@@ -244,6 +234,11 @@ export default function EstimationWizard() {
                       </div>
                     </div>
                   </Card>
+                  <Card padding="p-5">
+                    <h2 className="font-display font-semibold text-carbon dark:text-white mb-1">Organisation</h2>
+                    <p className="text-xs text-coolslate mb-4">Where this task belongs. Component and Subcomponent are optional.</p>
+                    <HierarchySelector value={hierarchy} onChange={setHierarchy} showErrors={triedNext} onNamesChange={setHierarchyNames} />
+                  </Card>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Card padding="p-5" className="min-w-0 overflow-hidden">
                       <h3 className="font-semibold text-carbon dark:text-white mb-3 text-sm">Complexity Level *</h3>
@@ -255,7 +250,8 @@ export default function EstimationWizard() {
                     </Card>
                   </div>
                   <div className="flex justify-end">
-                    <Button type="button" onClick={() => canNext0 && setStep(1)} disabled={!canNext0}
+                    {!hierarchyOk && <p className="text-xs text-coolslate self-center mr-3">Select Department, Program and Baseline to continue</p>}
+                    <Button type="button" onClick={() => { setTriedNext(true); if (canNext0) setStep(1); }} disabled={!canNext0}
                       icon={<ChevronRight size={16} />} iconRight>
                       Next: Competency
                     </Button>
@@ -294,7 +290,10 @@ export default function EstimationWizard() {
                     <h2 className="font-display font-semibold text-carbon dark:text-white mb-4">Estimation Summary</h2>
                     <div className="space-y-3">
                       {[
-                        ['Task', watch('title')], ['Project', watch('project_name') || '—'],
+                        ['Task', watch('title')],
+                        ['Department', hierarchyNames.department || '—'], ['Program', hierarchyNames.program || '—'],
+                        ['Baseline', hierarchyNames.baseline || '—'],
+                        ['Component', hierarchyNames.component || '—'], ['Subcomponent', hierarchyNames.subcomponent || '—'],
                         ['Complexity', complexity], ['Risk', risk], ['Competency', competency],
                         ['Work Group', workGroup],
                       ].map(([l, v]) => (

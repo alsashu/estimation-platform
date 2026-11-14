@@ -1,14 +1,21 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Calculator, TrendingUp, Clock, Target, CheckCircle, AlertCircle, BarChart3, ChevronRight, Sigma } from 'lucide-react';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell, CartesianGrid } from 'recharts';
+import { LayoutDashboard, Calculator, TrendingUp, Target, CheckCircle, BarChart3, ChevronRight, Sigma } from 'lucide-react';
+import { ResponsiveContainer, Tooltip, PieChart, Pie, Cell } from 'recharts';
 import { analysisApi, estimationsApi } from '../../services/api';
-import { useProjectStore } from '../../store/projectStore';
-import { StatCard, Card, Badge, Skeleton, Button, SPDot, Modal } from '../../components/ui';
+import { HierarchyFilterBar, usePageHierarchyFilter } from '../../components/hierarchy/HierarchyFilterBar';
+import { StatCard, Card, Badge, Button, SPDot, Modal } from '../../components/ui';
 import { fmt, accuracyBg, cn } from '../../utils/formatters';
 import { SP_COLORS, COMPLEXITY_COLORS, CHART_COLORS } from '../../config/theme';
-import type { Estimation } from '../../types';
+import type { Estimation, TrendPoint } from '../../types';
+import { useAuthStore } from '../../store/authStore';
+import { EstimationActivityCard, type ActivitySeries } from '../../components/dashboard/EstimationActivityCard';
+
+const SP_ACTIVITY_SERIES: ActivitySeries<TrendPoint>[] = [
+  { key: 'total', name: 'Created', color: { light: '#1E3246', dark: '#D2D7DC' } },
+  { key: 'completed', name: 'Completed', color: { light: '#19AA6E', dark: '#19AA6E' } },
+];
 
 function PageHeader({ onNewEstimate }: { onNewEstimate: () => void }) {
   return (
@@ -26,6 +33,7 @@ function PageHeader({ onNewEstimate }: { onNewEstimate: () => void }) {
 
 function EstimationMethodModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const navigate = useNavigate();
+  const hasPE = useAuthStore(s => s.hasModule('PE'));
 
   const handleSelect = (path: string) => {
     onClose();
@@ -35,7 +43,7 @@ function EstimationMethodModal({ isOpen, onClose }: { isOpen: boolean; onClose: 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Choose Estimation Method" size="lg">
       <div>
-        <p className="text-sm text-coolslate mb-6">Select how you'd like to estimate your project tasks</p>
+        <p className="text-sm text-coolslate mb-6">Select how you'd like to estimate your program tasks</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
           {/* Storypoint Estimation */}
@@ -59,8 +67,8 @@ function EstimationMethodModal({ isOpen, onClose }: { isOpen: boolean; onClose: 
             </div>
           </button>
 
-          {/* Parametric Estimation */}
-          <button
+          {/* Parametric Estimation — only offered to users with PE module access */}
+          {hasPE && <button
             onClick={() => handleSelect('/parametric-estimation')}
             className="group text-left p-5 rounded-xl border-2 border-lgrayblue/40 dark:border-slate-600 hover:border-carbon/40 dark:hover:border-lgrayblue/60 hover:bg-carbon/3 dark:hover:bg-white/5 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-carbon/20"
           >
@@ -79,7 +87,7 @@ function EstimationMethodModal({ isOpen, onClose }: { isOpen: boolean; onClose: 
               <span>Preview</span>
               <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform duration-200" />
             </div>
-          </button>
+          </button>}
 
         </div>
       </div>
@@ -89,14 +97,15 @@ function EstimationMethodModal({ isOpen, onClose }: { isOpen: boolean; onClose: 
 
 export default function Dashboard() {
   const [showModal, setShowModal] = useState(false);
-  const { selectedProjectId } = useProjectStore();
-  const projectParam = selectedProjectId ? { projectId: selectedProjectId } : {};
-  const projectFilter = selectedProjectId ? { project_id: selectedProjectId } : {};
+  // Department + Program from the header, Baseline from the page filter
+  const { filter, setFilter, params: scope } = usePageHierarchyFilter();
+  const projectParam = scope;
+  const projectFilter = scope;
+  const scopeKey = JSON.stringify(scope);
 
-  const { data: summary, isLoading: sumLoading } = useQuery({ queryKey: ['analysis-summary', selectedProjectId], queryFn: () => analysisApi.getSummary(projectParam), retry: false });
-  const { data: trend, isLoading: trendLoading } = useQuery({ queryKey: ['trend', selectedProjectId], queryFn: () => analysisApi.getTrend({ days: 30, ...projectParam }), retry: false });
-  const { data: complexityData } = useQuery({ queryKey: ['complexity-breakdown', selectedProjectId], queryFn: () => analysisApi.getByComplexity(projectParam), retry: false });
-  const { data: recentData } = useQuery({ queryKey: ['estimations-recent', selectedProjectId], queryFn: () => estimationsApi.getAll({ limit: 8, page: 1, ...projectFilter }), retry: false });
+  const { data: summary, isLoading: sumLoading } = useQuery({ queryKey: ['analysis-summary', scopeKey], queryFn: () => analysisApi.getSummary(projectParam), retry: false });
+  const { data: complexityData } = useQuery({ queryKey: ['complexity-breakdown', scopeKey], queryFn: () => analysisApi.getByComplexity(projectParam), retry: false });
+  const { data: recentData } = useQuery({ queryKey: ['estimations-recent', scopeKey], queryFn: () => estimationsApi.getAll({ limit: 8, page: 1, ...projectFilter }), retry: false });
 
   const recentEstimations: Estimation[] = recentData?.data || [];
 
@@ -110,6 +119,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <PageHeader onNewEstimate={() => setShowModal(true)} />
+      <HierarchyFilterBar value={filter} onChange={setFilter} depth="baseline" />
 
       {/* KPI Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -125,40 +135,15 @@ export default function Dashboard() {
 
       {/* Trend + Complexity */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        {/* Area chart */}
-        <Card className="xl:col-span-2" padding="p-5">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="font-display font-semibold text-carbon dark:text-white">Estimation Activity</h2>
-              <p className="text-xs text-coolslate mt-0.5">Daily estimations over the last 30 days</p>
-            </div>
-            {summary && <Badge variant={biasVariant}>{biasLabel}</Badge>}
-          </div>
-          {trendLoading ? <Skeleton className="h-48" /> : (
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={trend || []} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="totalGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#1E3246" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#1E3246" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="completedGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#19AA6E" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#19AA6E" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(120,130,145,0.1)" />
-                <XAxis dataKey="date" tickFormatter={(v) => new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
-                  tick={{ fontSize: 11, fill: '#788291' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#788291' }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ background: 'var(--tw-bg-offwhite,#fff)', border: '1px solid #D2D7DC', borderRadius: 10, fontSize: 12 }}
-                  labelFormatter={(v) => fmt.date(v)} />
-                <Area type="monotone" dataKey="total" name="Total" stroke="#1E3246" strokeWidth={2} fill="url(#totalGrad)" />
-                <Area type="monotone" dataKey="completed" name="Completed" stroke="#19AA6E" strokeWidth={2} fill="url(#completedGrad)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          )}
-        </Card>
+        {/* Estimation Activity (date-range filtered) */}
+        <EstimationActivityCard<TrendPoint>
+          queryKey="trend"
+          scope={scope}
+          fetchActivity={analysisApi.getActivity}
+          noun="estimations"
+          series={SP_ACTIVITY_SERIES}
+          badge={summary && <Badge variant={biasVariant}>{biasLabel}</Badge>}
+        />
 
         {/* Complexity pie */}
         <Card padding="p-5">

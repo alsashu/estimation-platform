@@ -4,11 +4,11 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Sigma, Save, Info, Loader2, TrendingUp, CheckCircle2 } from 'lucide-react';
 import { parametricEstimationsApi } from '../../services/api';
-import { useProjectStore } from '../../store/projectStore';
+import { HierarchySelector, EMPTY_SELECTION, isHierarchyComplete, toHierarchyPayload } from '../../components/hierarchy/HierarchySelector';
 import { useToastStore } from '../../store';
 import { Card, Button, Badge, Tooltip } from '../../components/ui';
 import { cn } from '../../utils/formatters';
-import type { ParametricSize } from '../../types';
+import type { ParametricSize, HierarchySelection } from '../../types';
 import { ParametricExcelUpload } from './ParametricExcelUpload';
 
 const SIZE_OPTIONS: ParametricSize[] = ['Small', 'Medium', 'Large', 'NA'];
@@ -34,7 +34,6 @@ const labelClass = 'text-sm font-medium text-carbon dark:text-lgrayblue flex ite
 
 interface FormData {
   task_title: string;
-  project_id: string;
   description: string;
   work_group: string;
   middleware_inputs: ParametricSize | '';
@@ -128,12 +127,14 @@ export default function ParametricEstimationPage() {
   const { addToast } = useToastStore();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { selectedProjectId, projects } = useProjectStore();
   const [tab, setTab] = useState<TabKey>('estimate');
+  // Department → Program → Baseline (mandatory) → Component → Subcomponent (optional) — shared with SP
+  const [hierarchy, setHierarchy] = useState<HierarchySelection>(EMPTY_SELECTION);
+  const [triedSave, setTriedSave] = useState(false);
 
   const { register, handleSubmit, watch, reset, formState: { errors } } = useForm<FormData>({
     defaultValues: {
-      task_title: '', project_id: selectedProjectId ?? '', description: '', work_group: '',
+      task_title: '', description: '', work_group: '',
       middleware_inputs: '', application: '', system_configuration: '', data_and_control_flow: '', use_case: '',
       team_efficiency: '1',
     },
@@ -143,9 +144,9 @@ export default function ParametricEstimationPage() {
   const canCalculate = FIELD_DEFS.every(f => values[f.key]) && !!values.team_efficiency;
 
   const { data: calc, isFetching: calculating, error } = useQuery({
-    queryKey: ['parametric-calc', values.project_id, values.middleware_inputs, values.application, values.system_configuration, values.data_and_control_flow, values.use_case, values.team_efficiency],
+    queryKey: ['parametric-calc', hierarchy.program_id, values.middleware_inputs, values.application, values.system_configuration, values.data_and_control_flow, values.use_case, values.team_efficiency],
     queryFn: () => parametricEstimationsApi.calculate({
-      project_id: values.project_id || undefined,
+      program_id: hierarchy.program_id || undefined,
       middleware_inputs: values.middleware_inputs as ParametricSize,
       application: values.application as ParametricSize,
       system_configuration: values.system_configuration as ParametricSize,
@@ -160,7 +161,7 @@ export default function ParametricEstimationPage() {
   const saveMutation = useMutation({
     mutationFn: (data: FormData) => parametricEstimationsApi.create({
       task_title: data.task_title,
-      project_id: data.project_id || undefined,
+      ...toHierarchyPayload(hierarchy),
       description: data.description || undefined,
       work_group: data.work_group || undefined,
       middleware_inputs: data.middleware_inputs as ParametricSize,
@@ -174,7 +175,7 @@ export default function ParametricEstimationPage() {
       addToast({ type: 'success', title: 'Parametric estimation saved', message: `${row.task_title} — ${Number(row.final_estimation).toFixed(2)} PersonDays` });
       qc.invalidateQueries({ queryKey: ['parametric-estimations'] });
       reset({
-        task_title: '', project_id: values.project_id, description: '', work_group: values.work_group,
+        task_title: '', description: '', work_group: values.work_group,
         middleware_inputs: '', application: '', system_configuration: '', data_and_control_flow: '', use_case: '',
         team_efficiency: '1',
       });
@@ -184,7 +185,8 @@ export default function ParametricEstimationPage() {
   });
 
   const onSubmit = (data: FormData) => {
-    if (!canCalculate) return;
+    setTriedSave(true);
+    if (!canCalculate || !isHierarchyComplete(hierarchy)) return;
     saveMutation.mutate(data);
   };
 
@@ -226,24 +228,24 @@ export default function ParametricEstimationPage() {
                       placeholder="e.g. Customer Onboarding API Integration" className={inputClass} />
                     {errors.task_title && <p className="text-xs text-vibrant mt-1">{errors.task_title.message}</p>}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className={labelClass}>Project</label>
-                      <select {...register('project_id')} className={inputClass}>
-                        <option value="">No project (use default master data)</option>
-                        {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className={labelClass}>Work Group</label>
-                      <input {...register('work_group')} placeholder="e.g. DEVELOPMENT" className={inputClass} />
-                    </div>
+                  <div>
+                    <label className={labelClass}>Work Group</label>
+                    <input {...register('work_group')} placeholder="e.g. DEVELOPMENT" className={inputClass} />
                   </div>
                   <div>
                     <label className={labelClass}>Description</label>
                     <textarea {...register('description')} rows={2} placeholder="Brief description of the task…" className={cn(inputClass, 'resize-none')} />
                   </div>
                 </div>
+              </Card>
+
+              {/* Organisation hierarchy */}
+              <Card padding="p-5">
+                <h2 className="font-display font-semibold text-carbon dark:text-white mb-1">Organisation</h2>
+                <p className="text-xs text-coolslate mb-4">
+                  Where this task belongs. The Program's parametric master-data mapping is used for the calculation. Component and Subcomponent are optional.
+                </p>
+                <HierarchySelector value={hierarchy} onChange={setHierarchy} showErrors={triedSave} />
               </Card>
 
               {/* Complexity inputs */}
@@ -308,7 +310,8 @@ export default function ParametricEstimationPage() {
               )}
 
               <div className="flex justify-end">
-                <Button type="submit" variant="success" loading={saveMutation.isPending} disabled={!canCalculate}>
+                {!isHierarchyComplete(hierarchy) && <p className="text-xs text-coolslate self-center mr-3">Select Department, Program and Baseline to save</p>}
+                <Button type="submit" variant="success" loading={saveMutation.isPending} disabled={!canCalculate || !isHierarchyComplete(hierarchy)}>
                   <Save size={15} /> Save Estimation
                 </Button>
               </div>

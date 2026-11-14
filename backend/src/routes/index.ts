@@ -8,11 +8,17 @@ import * as pe from '../controllers/parametricEstimations.controller';
 import * as pa from '../controllers/parametricAnalysis.controller';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
+import hierarchyRoutes from './hierarchy.routes';
+import performanceRoutes from './performance.routes';
 
 const router = Router();
 
 // All estimation platform APIs require authentication
 router.use(authenticate);
+
+// ─── Organisational hierarchy: departments, baselines, components, lookups, effort ──
+router.use(hierarchyRoutes);
+router.use(performanceRoutes);
 
 // ─── Master Data: Story Points ──────────────────────────────────────────────
 router.get   ('/story-points',       authorize('master.read'),  sp.getAllStoryPoints);
@@ -66,6 +72,8 @@ router.get   ('/parametric-estimations',           authorize('parametric.read'),
 router.post  ('/parametric-estimations',           authorize('parametric.create'), pe.create);
 router.post  ('/parametric-estimations/import',    authorize('parametric.import'), pe.batchImport);
 router.get   ('/parametric-estimations/:id',       authorize('parametric.read'),   pe.getById);
+router.put   ('/parametric-estimations/:id',       authorize('parametric.create'), pe.update);
+router.patch ('/parametric-estimations/:id/actuals', authorize('parametric.create'), pe.recordActuals);
 
 // ─── Analysis ────────────────────────────────────────────────────────────────
 router.get('/analysis/summary',     authorize('estimation.read'), analysis.getSummary);
@@ -80,6 +88,7 @@ router.get('/parametric-analysis/size-distribution',  authorize('parametric.read
 router.get('/parametric-analysis/work-group',         authorize('parametric.read'), pa.getByWorkGroup);
 router.get('/parametric-analysis/config',             authorize('parametric.read'), pa.getByConfig);
 router.get('/parametric-analysis/trend',              authorize('parametric.read'), pa.getTrend);
+router.get('/parametric-analysis/actuals',            authorize('parametric.read'), pa.getActuals);
 
 // ─── Notifications (user-scoped) ─────────────────────────────────────────────
 router.get  ('/notifications',              sp.getNotifications);

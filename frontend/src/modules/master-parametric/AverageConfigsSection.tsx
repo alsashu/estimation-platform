@@ -93,7 +93,7 @@ export function AverageConfigsSection() {
       ) : (
         <table className="w-full">
           <thead><tr className="border-b border-lgrayblue/20 dark:border-slate-700">
-            {['Name', 'Small', 'Medium', 'Large', 'Status', 'Projects', 'Actions'].map(h => (
+            {['Name', 'Small', 'Medium', 'Large', 'Status', 'Programs', 'Actions'].map(h => (
               <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-coolslate uppercase tracking-wide">{h}</th>
             ))}
           </tr></thead>

@@ -5,6 +5,49 @@ import { registrationsApi } from '../../services/api';
 import type { RegistrationRequest } from '../../services/api';
 import { useToastStore } from '../../store';
 import { fmt } from '../../utils/formatters';
+import { useAuthStore } from '../../store/authStore';
+import { EstimationModuleAccessField } from '../../components/access/EstimationModuleAccessField';
+import { validateModuleSelection, type ModuleCode } from '../../utils/moduleAccess';
+
+/** Approving creates the account, so the approver must choose its estimation modules (within their own). */
+function ApproveModal({ request, onClose }: { request: RegistrationRequest; onClose: () => void }) {
+  const qc = useQueryClient();
+  const { addToast } = useToastStore();
+  const actorModules = useAuthStore(st => st.getModules());
+  const [modules, setModules] = useState<ModuleCode[]>([]);
+  const [tried, setTried] = useState(false);
+  const error = validateModuleSelection(modules, actorModules);
+
+  const mut = useMutation({
+    mutationFn: () => registrationsApi.approve(request.id, modules),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['registrations'] });
+      qc.invalidateQueries({ queryKey: ['pending-count'] });
+      addToast({ type: 'success', title: 'Registration approved — user account created' });
+      onClose();
+    },
+    onError: (e: Error) => addToast({ type: 'error', title: e.message }),
+  });
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-carbon-800 rounded-2xl shadow-modal w-full max-w-md p-6 space-y-4">
+        <div>
+          <h2 className="text-base font-semibold text-carbon dark:text-white">Approve Registration</h2>
+          <p className="text-coolslate text-sm">{request.first_name} {request.last_name} · {request.email}</p>
+        </div>
+        <EstimationModuleAccessField value={modules} onChange={setModules} actorModules={actorModules} showErrors={tried} />
+        <div className="flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-coolslate hover:text-carbon dark:hover:text-white">Cancel</button>
+          <button onClick={() => { setTried(true); if (!error) mut.mutate(); }} disabled={mut.isPending}
+            className="px-4 py-2 bg-greenline text-white rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5">
+            {mut.isPending ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />} Approve
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function RejectModal({ id, onClose }: { id: string; onClose: () => void }) {
   const qc = useQueryClient();
@@ -48,11 +91,7 @@ export default function RegistrationsPage() {
     queryFn: () => registrationsApi.list({ status: filter || undefined, limit: 50 }),
   });
 
-  const approveMut = useMutation({
-    mutationFn: (id: string) => registrationsApi.approve(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['registrations'] }); addToast({ type: 'success', title: 'Registration approved — user account created' }); },
-    onError: (e: Error) => addToast({ type: 'error', title: e.message }),
-  });
+  const [approveReq, setApproveReq] = useState<RegistrationRequest | null>(null);
 
   const statusIcon = (s: string) => {
     if (s === 'pending')  return <Clock size={13} className="text-gold" />;
@@ -162,9 +201,9 @@ export default function RegistrationsPage() {
                         className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-vibrant/10 text-vibrant hover:bg-vibrant/20 transition-colors">
                         <XCircle size={12} /> Reject
                       </button>
-                      <button onClick={() => approveMut.mutate(r.id)} disabled={approveMut.isPending}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-greenline/10 text-greenline hover:bg-greenline/20 transition-colors disabled:opacity-50">
-                        {approveMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />} Approve
+                      <button onClick={() => setApproveReq(r)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-greenline/10 text-greenline hover:bg-greenline/20 transition-colors">
+                        <CheckCircle size={12} /> Approve
                       </button>
                     </div>
                   )}
@@ -176,6 +215,7 @@ export default function RegistrationsPage() {
       )}
 
       {rejectId && <RejectModal id={rejectId} onClose={() => setRejectId(null)} />}
+      {approveReq && <ApproveModal request={approveReq} onClose={() => setApproveReq(null)} />}
     </div>
   );
 }

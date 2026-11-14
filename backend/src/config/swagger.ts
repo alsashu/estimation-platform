@@ -217,6 +217,146 @@ const paginationParams = [
   { in: 'query' as const, name: 'limit',  schema: { type: 'integer', default: 20 } },
 ];
 
+// ─── Organisational hierarchy (see docs/HIERARCHY.md) ─────────────────────────
+const q = (name: string, required = false, description?: string) =>
+  ({ in: 'query' as const, name, required, schema: { type: 'string' }, ...(description ? { description } : {}) });
+const op = (tag: string, summary: string, extra: Record<string, unknown> = {}) => ({
+  tags: [tag], summary,
+  responses: { 200: { description: 'OK' }, 400: { description: 'Validation / hierarchy-consistency error' }, 403: { description: 'Outside the caller\'s Department/Program scope or missing permission' }, 409: { description: 'Duplicate' } },
+  ...extra,
+});
+const body = (props: Record<string, string>, required: string[]) => ({
+  requestBody: { required: true, content: { 'application/json': { schema: {
+    type: 'object', required,
+    properties: Object.fromEntries(Object.entries(props).map(([k, t]) => [k, { type: t }])),
+  } } } },
+});
+const SCOPE_FILTERS = ['departmentId', 'programId', 'baselineId', 'componentId', 'subcomponentId'].map(n => q(n));
+const crud = (tag: string, base: string, label: string, createProps: Record<string, string>, required: string[], parentParam?: string) => ({
+  [base]: {
+    get:  op(tag, `List ${label}s`, { parameters: [...(parentParam ? [q(parentParam)] : []), q('search'), q('status')] }),
+    post: op(tag, `Create ${label}`, body(createProps, required)),
+  },
+  [`${base}/{id}`]: {
+    get:    op(tag, `Get ${label}`, { parameters: [idParam] }),
+    put:    op(tag, `Update ${label}`, { parameters: [idParam], ...body(createProps, []) }),
+    delete: op(tag, `Delete ${label} (only when nothing references it)`, { parameters: [idParam] }),
+  },
+});
+
+// ─── User management: Estimation Module Access (SP / PE), independent of roles ───
+const MODULES_SCHEMA = {
+  type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', enum: ['SP', 'PE'] },
+  description: 'Estimation Module Access — SP (Story Point) and/or PE (Parametric). At least one. Callers can only grant '
+    + 'modules they hold themselves (403 otherwise); on update, modules the caller cannot manage are kept. A Global Super Admin always has both.',
+};
+const userBody = (required: string[]) => ({
+  requestBody: { required: true, content: { 'application/json': { schema: {
+    type: 'object', required,
+    properties: {
+      firstName: { type: 'string' }, lastName: { type: 'string' }, username: { type: 'string' }, email: { type: 'string' },
+      password: { type: 'string' }, roleIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+      projectIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+      departments: { type: 'array', items: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, access_scope: { type: 'string', enum: ['assigned', 'all'] } } } },
+      modules: MODULES_SCHEMA,
+    },
+  } } } },
+});
+const userPaths = {
+  '/users': {
+    get: op('User Management', 'List users (includes estimation_modules)', { parameters: [q('search'), q('status'), q('role'), q('page'), q('limit')] }),
+    post: op('User Management', 'Create user with roles, Department/Program access and Estimation Module Access', userBody(['firstName', 'lastName', 'username', 'email', 'password', 'modules'])),
+  },
+  '/users/{id}': {
+    get: op('User Management', 'Get user (includes estimation_modules)', { parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }] }),
+    put: op('User Management', "Update user; modules replaces the module set within the caller's own modules (audited as estimation_access_updated)", {
+      parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }], ...userBody([]) }),
+  },
+  '/registrations/{id}/approve': {
+    post: op('User Management', 'Approve a registration — creates the account with the given Estimation Module Access', {
+      parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }],
+      requestBody: { required: true, content: { 'application/json': { schema: {
+        type: 'object', required: ['modules'], properties: { roleId: { type: 'string', format: 'uuid' }, modules: MODULES_SCHEMA },
+      } } } },
+    }),
+  },
+};
+
+// ─── Estimation Performance dashboard (see docs/ESTIMATION_PERFORMANCE.md) ─────
+const PERF_FILTERS = [
+  q('departmentId'), q('programIds', false, 'Comma-separated program ids (all accessible programs when omitted)'), q('baselineId'),
+  q('from', false, 'YYYY-MM-DD (completion date, caller time zone)'), q('to', false, 'YYYY-MM-DD, not in the future'),
+  q('tz', false, 'IANA time zone, default UTC'),
+  { in: 'query' as const, name: 'method', schema: { type: 'string', enum: ['BOTH', 'SP', 'PE'], default: 'BOTH' },
+    description: 'BOTH reports the methods the caller holds; an explicit method the caller lacks returns 403' },
+];
+const BASELINE_BODY = body({
+  department_id: 'string', program_id: 'string', estimation_method: 'string', label: 'string', period_from: 'string', period_to: 'string',
+  record_count: 'integer', total_estimated_pd: 'number', total_actual_pd: 'number', total_abs_error_pd: 'number', source_note: 'string',
+}, ['department_id', 'label', 'record_count', 'total_estimated_pd', 'total_actual_pd', 'total_abs_error_pd']);
+const performancePaths = {
+  '/performance/dashboard': { get: op('Estimation Performance', 'EFA / ED / EBI / EEI with previous period, indicators, program/department comparisons, trend and |ED| distribution (PersonDays)', { parameters: PERF_FILTERS }) },
+  '/performance/breakdown': { get: op('Estimation Performance', 'Drill-down rows: Department → Program → Baseline → Task', {
+    parameters: [...PERF_FILTERS, { in: 'query' as const, name: 'groupBy', schema: { type: 'string', enum: ['department', 'program', 'baseline', 'task'], default: 'program' } }] }) },
+  '/performance/baselines': {
+    get: op('Estimation Performance', 'Governed pre-framework historical baselines (the historical side of EBI)', { parameters: [q('departmentId'), q('programIds'), q('includeInactive')] }),
+    post: op('Estimation Performance', 'Create a historical baseline (performance.baseline.manage). One active per Department/Program/method', BASELINE_BODY),
+  },
+  '/performance/baselines/{id}': { put: op('Estimation Performance', 'Edit = new version; the previous version is retired (supersedes_id)', { parameters: [idParam], ...BASELINE_BODY }) },
+  '/performance/baselines/{id}/status': { patch: op('Estimation Performance', 'Deactivate / reactivate a baseline version', { parameters: [idParam], ...body({ is_active: 'boolean' }, ['is_active']) }) },
+  '/performance/settings': {
+    get: op('Estimation Performance', 'Status thresholds, on-target tolerance, histogram bounds, default range'),
+    put: op('Estimation Performance', 'Update KPI settings (performance.baseline.manage)', body({ on_target_tolerance: 'number', distribution_bounds: 'array', thresholds: 'object', default_range_days: 'integer' },
+      ['on_target_tolerance', 'distribution_bounds', 'thresholds', 'default_range_days'])),
+  },
+  '/performance/snapshots': {
+    get: op('Estimation Performance', 'List report snapshots (own; all for global users)'),
+    post: op('Estimation Performance', 'Freeze the dashboard for the given filters (recalculated on the server)', body({ label: 'string', filters: 'object' }, ['label', 'filters'])),
+  },
+  '/performance/snapshots/{id}': { get: op('Estimation Performance', 'Get a snapshot with its full stored result', { parameters: [idParam] }) },
+};
+
+const departmentPaths = crud('Departments', '/departments', 'department', { name: 'string', code: 'string', description: 'string' }, ['name', 'code']);
+delete (departmentPaths['/departments/{id}'] as Record<string, unknown>).delete; // departments are deactivated, never deleted
+
+const hierarchyPaths = {
+  ...departmentPaths,
+  '/departments/{id}/status': { patch: op('Departments', 'Activate / deactivate a department', { parameters: [idParam], ...body({ status: 'string' }, ['status']) }) },
+  '/departments/{id}/users': {
+    get:  op('Departments', 'List users assigned to a department', { parameters: [idParam] }),
+    post: op('Departments', 'Assign users to a department', { parameters: [idParam], ...body({ userIds: 'array' }, ['userIds']) }),
+  },
+  '/departments/{id}/users/{userId}': { delete: op('Departments', 'Remove a user from a department (also drops their programs in it)', { parameters: [idParam, { in: 'path', name: 'userId', required: true, schema: { type: 'string', format: 'uuid' } }] }) },
+  ...crud('Programs', '/projects', 'program', { department_id: 'string', name: 'string', code: 'string', description: 'string', status: 'string' }, ['department_id', 'name', 'code'], 'departmentId'),
+  ...crud('Baselines', '/baselines', 'baseline', { program_id: 'string', name: 'string', version: 'string', description: 'string', start_date: 'string', end_date: 'string' }, ['program_id', 'name'], 'programId'),
+  '/baselines/{id}/status': { patch: op('Baselines', 'Activate / deactivate a baseline', { parameters: [idParam], ...body({ status: 'string' }, ['status']) }) },
+  ...crud('Components', '/components', 'component', { baseline_id: 'string', name: 'string', description: 'string' }, ['baseline_id', 'name'], 'baselineId'),
+  ...crud('Components', '/subcomponents', 'subcomponent', { component_id: 'string', name: 'string', description: 'string' }, ['component_id', 'name'], 'componentId'),
+  '/hierarchy/context': { get: op('Hierarchy Lookups', 'Departments and programs the caller can access (header context)') },
+  '/hierarchy/lookup/departments':   { get: op('Hierarchy Lookups', 'Accessible active departments',   { parameters: [q('search')] }) },
+  '/hierarchy/lookup/programs':      { get: op('Hierarchy Lookups', 'Accessible active programs of a department', { parameters: [q('departmentId', true), q('search')] }) },
+  '/hierarchy/lookup/baselines':     { get: op('Hierarchy Lookups', 'Active baselines of a program',   { parameters: [q('programId', true), q('search')] }) },
+  '/hierarchy/lookup/components':    { get: op('Hierarchy Lookups', 'Components of a baseline',        { parameters: [q('baselineId', true), q('search')] }) },
+  '/hierarchy/lookup/subcomponents': { get: op('Hierarchy Lookups', 'Subcomponents of a component',    { parameters: [q('componentId', true), q('search')] }) },
+  '/parametric-estimations/{id}/actuals': {
+    patch: op('Parametric Actuals', 'Record or correct actual effort (PersonDays) for a parametric task', {
+      description: 'Derives Variance = Estimated − Actual, Accuracy = max(0, 100 − Deviation), Deviation = |E − A| / E × 100 (null when the estimate is 0). '
+        + 'The estimate is never modified. Correcting existing actuals requires being the original recorder or holding parametric.actuals.correct. Every change is written to audit_logs.',
+      parameters: [idParam],
+      ...body({ actual_days: 'number', notes: 'string', completed_at: 'string' }, ['actual_days']),
+    }),
+  },
+  '/parametric-analysis/actuals': {
+    get: op('Parametric Actuals', 'Estimated vs Actual scatter points and accuracy bands for completed tasks', { parameters: SCOPE_FILTERS }),
+  },
+  '/hierarchy/effort': {
+    get: op('Hierarchy Lookups', 'Estimated vs Actual effort aggregated by hierarchy level', {
+      description: 'SP (`module=sp`, hours, needs estimation.read) and PE (`module=pe`, person-days, needs parametric.read) are aggregated independently. Tasks without a component/subcomponent roll up under "(No component)" / "(No subcomponent)".',
+      parameters: [q('module', true, 'sp | pe'), q('groupBy', true, 'department | program | baseline | component | subcomponent | task'), ...SCOPE_FILTERS, q('from'), q('to')],
+    }),
+  },
+};
+
 // ─── OpenAPI Document ─────────────────────────────────────────────────────────
 export const swaggerSpec = {
   openapi: '3.0.3',
@@ -252,11 +392,22 @@ Each request gets a unique \`X-Correlation-Id\` header in the response for log t
     { name: 'Definitions',       description: 'Read-only complexity and risk level definitions' },
     { name: 'Analysis',          description: 'Aggregated analytics and trend data' },
     { name: 'Notifications',     description: 'In-app notification management' },
+    { name: 'Departments',       description: 'Department master data and user assignment' },
+    { name: 'Programs',          description: 'Programs (formerly Projects) — always belong to a Department' },
+    { name: 'Baselines',         description: 'Versioned baselines of a Program' },
+    { name: 'Components',        description: 'Optional Components / Subcomponents of a Baseline' },
+    { name: 'Parametric Actuals', description: 'Estimated vs Actual PersonDays for Parametric Estimation tasks' },
+    { name: 'Estimation Performance', description: 'EFA, ED, EBI and EEI from Historical Data SP + PE on a PersonDay basis; governed pre-framework baselines; snapshots' },
+    { name: 'User Management', description: 'Users, registrations and Estimation Module Access (SP / PE). SP / PE APIs return 403 for users without that module.' },
+    { name: 'Hierarchy Lookups', description: 'Permission-filtered cascading dropdown data and Estimated vs Actual aggregation' },
     { name: 'Monitoring – Logs', description: 'Application log querying and management' },
     { name: 'Monitoring – Health', description: 'Service health and readiness probes' },
   ],
   components: { schemas },
   paths: {
+    ...hierarchyPaths,
+    ...userPaths,
+    ...performancePaths,
     // ─── Estimations ─────────────────────────────────────────────────────────
     '/estimations/calculate': {
       get: {
@@ -514,9 +665,30 @@ Each request gets a unique \`X-Correlation-Id\` header in the response for log t
     },
     '/analysis/trend': {
       get: {
-        tags: ['Analysis'], summary: 'Get daily count trend',
-        parameters: [{ in: 'query', name: 'days', schema: { type: 'integer', default: 30 } }],
-        responses: { 200: { description: 'Daily trend data' } },
+        tags: ['Analysis'], summary: 'Estimation Activity (SP): created / completed per bucket',
+        description: 'Zero-filled buckets over the range; interval is day (≤ 62 days), week (≤ 366) or month. Max 3660 days. Returns { data, meta: { from, to, timezone, interval, days } }; 400 on invalid ranges. total counts by created_at, completed by completed_at.',
+        parameters: [
+          { in: 'query', name: 'from', schema: { type: 'string', format: 'date' }, description: 'From Date (YYYY-MM-DD, inclusive). Requires to.' },
+          { in: 'query', name: 'to', schema: { type: 'string', format: 'date' }, description: 'To Date (YYYY-MM-DD, inclusive, not in the future). Requires from.' },
+          { in: 'query', name: 'tz', schema: { type: 'string', default: 'UTC' }, description: 'IANA time zone the dates are in (e.g. Asia/Kolkata)' },
+          { in: 'query', name: 'days', schema: { type: 'integer', default: 30 }, description: 'Legacy: last N days ending today; ignored when from/to are given' },
+          ...SCOPE_FILTERS,
+        ],
+        responses: { 200: { description: 'Activity buckets' }, 400: { description: 'Invalid date range or time zone' } },
+      },
+    },
+    '/parametric-analysis/trend': {
+      get: {
+        tags: ['Analysis'], summary: 'Estimation Activity (PE): estimations per bucket, split manual / Excel import',
+        description: 'Zero-filled buckets over the range; interval is day (≤ 62 days), week (≤ 366) or month. Max 3660 days. Returns { data, meta: { from, to, timezone, interval, days } }; 400 on invalid ranges. Buckets by created_at.',
+        parameters: [
+          { in: 'query', name: 'from', schema: { type: 'string', format: 'date' }, description: 'From Date (YYYY-MM-DD, inclusive). Requires to.' },
+          { in: 'query', name: 'to', schema: { type: 'string', format: 'date' }, description: 'To Date (YYYY-MM-DD, inclusive, not in the future). Requires from.' },
+          { in: 'query', name: 'tz', schema: { type: 'string', default: 'UTC' }, description: 'IANA time zone the dates are in (e.g. Asia/Kolkata)' },
+          { in: 'query', name: 'days', schema: { type: 'integer', default: 30 }, description: 'Legacy: last N days ending today; ignored when from/to are given' },
+          ...SCOPE_FILTERS,
+        ],
+        responses: { 200: { description: 'Activity buckets' }, 400: { description: 'Invalid date range or time zone' } },
       },
     },
 

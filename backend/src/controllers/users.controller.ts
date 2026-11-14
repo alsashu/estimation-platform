@@ -4,6 +4,27 @@ import { query, queryOne } from '../config/database';
 import { hashPassword, comparePassword, validatePasswordPolicy } from '../auth/password';
 import { auditLog } from '../services/audit.service';
 import { createNotification } from '../services/notification.service';
+import { checkGrantScope, syncUserAccess, USER_DEPARTMENTS_JSON } from '../services/userAccess.service';
+import {
+  MODULE_CODES, decideModuleGrant, getUserModules, invalidateUserModules, setUserModules, USER_MODULES_SQL,
+  isGlobalSuperAdminRoles, type ModuleCode,
+} from '../services/estimationAccess.service';
+
+/** Estimation Module Access (SP / PE) — independent of the role. */
+export const modulesSchema = z.array(z.enum(MODULE_CODES)).min(1, 'Select at least one estimation module')
+  .refine(a => new Set(a).size === a.length, 'Duplicate estimation module');
+
+/** Global Super Admins always hold every module, whatever rows exist. */
+function withEffectiveModules<T>(row: T): T {
+  const roles = ((row as { roles?: Array<string | { name: string }> }).roles) ?? [];
+  const names = roles.map(r => (typeof r === 'string' ? r : r.name));
+  return isGlobalSuperAdminRoles(names) ? { ...row, estimation_modules: [...MODULE_CODES] } : row;
+}
+
+const departmentGrantSchema = z.object({
+  id: z.string().uuid(),
+  access_scope: z.enum(['assigned', 'all']).default('assigned'),
+});
 
 interface UserRow {
   id: string; first_name: string; last_name: string; username: string;
@@ -69,7 +90,9 @@ export async function listUsers(req: Request, res: Response): Promise<void> {
             u.last_login_at, u.created_at, u.updated_at,
             COALESCE(json_agg(DISTINCT r.name) FILTER (WHERE r.name IS NOT NULL), '[]') AS roles,
             COALESCE(json_agg(DISTINCT jsonb_build_object('id', p.id, 'name', p.name, 'code', p.code))
-                     FILTER (WHERE p.id IS NOT NULL), '[]') AS projects
+                     FILTER (WHERE p.id IS NOT NULL), '[]') AS projects,
+            ${USER_DEPARTMENTS_JSON},
+            ${USER_MODULES_SQL}
      FROM users u
      LEFT JOIN user_roles ur ON ur.user_id = u.id
      LEFT JOIN roles r ON r.id = ur.role_id
@@ -86,7 +109,7 @@ export async function listUsers(req: Request, res: Response): Promise<void> {
     `SELECT COUNT(*) as count FROM users u ${where}`, params
   );
   const total = parseInt(countRows[0]?.count ?? '0');
-  res.json({ success: true, data, total, page: Number(page), limit: Number(limit) });
+  res.json({ success: true, data: data.map(withEffectiveModules), total, page: Number(page), limit: Number(limit) });
 }
 
 // ─── Get User ─────────────────────────────────────────────────────────────────
@@ -104,7 +127,9 @@ export async function getUser(req: Request, res: Response): Promise<void> {
     `SELECT u.id, u.first_name, u.last_name, u.username, u.email, u.status, u.is_active,
             u.last_login_at, u.created_at, u.updated_at,
             COALESCE(json_agg(DISTINCT jsonb_build_object('id', r.id, 'name', r.name)) FILTER (WHERE r.id IS NOT NULL), '[]') AS roles,
-            COALESCE(json_agg(DISTINCT jsonb_build_object('id', p.id, 'name', p.name, 'code', p.code)) FILTER (WHERE p.id IS NOT NULL), '[]') AS projects
+            COALESCE(json_agg(DISTINCT jsonb_build_object('id', p.id, 'name', p.name, 'code', p.code, 'department_id', p.department_id)) FILTER (WHERE p.id IS NOT NULL), '[]') AS projects,
+            ${USER_DEPARTMENTS_JSON},
+            ${USER_MODULES_SQL}
      FROM users u
      LEFT JOIN user_roles ur ON ur.user_id = u.id
      LEFT JOIN roles r ON r.id = ur.role_id
@@ -115,7 +140,7 @@ export async function getUser(req: Request, res: Response): Promise<void> {
     [req.params.id]
   );
   if (!user) { res.status(404).json({ success: false, error: 'User not found' }); return; }
-  res.json({ success: true, data: user });
+  res.json({ success: true, data: withEffectiveModules(user) });
 }
 
 // ─── Create User ──────────────────────────────────────────────────────────────
@@ -127,6 +152,9 @@ const createUserSchema = z.object({
   password:  z.string().min(8),
   roleIds:   z.array(z.string().uuid()).optional(),
   projectIds: z.array(z.string().uuid()).optional(),
+  departments: z.array(departmentGrantSchema).optional(),
+  /** At least one of SP / PE, never beyond the creator's own modules. */
+  modules: modulesSchema,
 });
 
 export async function createUser(req: Request, res: Response): Promise<void> {
@@ -155,15 +183,13 @@ export async function createUser(req: Request, res: Response): Promise<void> {
     }
   }
 
-  // Admins can only assign projects they have access to
-  if (req.user.projectIds !== '*' && body.projectIds?.length) {
-    const allowed = req.user.projectIds as string[];
-    const unauthorized = body.projectIds.filter(pid => !allowed.includes(pid));
-    if (unauthorized.length > 0) {
-      res.status(403).json({ success: false, error: 'Cannot assign projects outside your access' });
-      return;
-    }
-  }
+  // Admins can only assign departments / programs they have access to
+  const grantError = checkGrantScope(req.user, body.departments, body.projectIds);
+  if (grantError) { res.status(403).json({ success: false, error: grantError }); return; }
+
+  // …and only estimation modules they hold themselves
+  const moduleGrant = decideModuleGrant(req.user.modules ?? [], body.modules);
+  if (!moduleGrant.ok) { res.status(moduleGrant.status!).json({ success: false, error: moduleGrant.error }); return; }
 
   const hash = await hashPassword(body.password);
   const [newUser] = await query<{ id: string }>(
@@ -181,15 +207,21 @@ export async function createUser(req: Request, res: Response): Promise<void> {
       [newUser.id, roleId, req.user.userId]);
   }
 
-  // Assign projects
-  for (const projectId of body.projectIds ?? []) {
-    await query(`INSERT INTO project_users (project_id, user_id, assigned_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-      [projectId, newUser.id, req.user.userId]);
+  // Assign departments + programs (program access always inside an assigned department)
+  if (body.departments !== undefined || body.projectIds !== undefined) {
+    await syncUserAccess(newUser.id, body.departments, body.projectIds, req.user.userId);
   }
+
+  await setUserModules(newUser.id, moduleGrant.modules!, req.user.userId);
+  await auditLog({
+    entity: 'user', entityId: newUser.id, action: 'estimation_access_granted',
+    previousValue: { modules: [] }, newValue: { modules: moduleGrant.modules },
+    user: req.user, req,
+  });
 
   await auditLog({
     entity: 'user', entityId: newUser.id, action: 'created',
-    newValue: { email: body.email, username: body.username },
+    newValue: { email: body.email, username: body.username, modules: moduleGrant.modules },
     user: req.user, req,
   });
 
@@ -200,7 +232,8 @@ export async function createUser(req: Request, res: Response): Promise<void> {
   });
 
   const created = await queryOne(
-    `SELECT id, first_name, last_name, username, email, status, is_active, created_at FROM users WHERE id=$1`,
+    `SELECT u.id, u.first_name, u.last_name, u.username, u.email, u.status, u.is_active, u.created_at, ${USER_MODULES_SQL}
+       FROM users u WHERE u.id=$1`,
     [newUser.id]
   );
   res.status(201).json({ success: true, data: created });
@@ -214,6 +247,8 @@ const updateUserSchema = z.object({
   email:     z.string().email().optional(),
   roleIds:   z.array(z.string().uuid()).optional(),
   projectIds: z.array(z.string().uuid()).optional(),
+  departments: z.array(departmentGrantSchema).optional(),
+  modules: modulesSchema.optional(),
 });
 
 export async function updateUser(req: Request, res: Response): Promise<void> {
@@ -234,20 +269,29 @@ export async function updateUser(req: Request, res: Response): Promise<void> {
     }
   }
 
-  // Admins can only assign projects they have access to
-  if (!isSA(req.user.roles) && body.projectIds?.length && req.user.projectIds !== '*') {
-    const allowed = req.user.projectIds as string[];
-    const unauthorized = body.projectIds.filter(pid => !allowed.includes(pid));
-    if (unauthorized.length > 0) {
-      res.status(403).json({ success: false, error: 'Cannot assign projects outside your access' });
-      return;
-    }
+  // Admins can only assign departments / programs they have access to
+  if (!isSA(req.user.roles)) {
+    const grantError = checkGrantScope(req.user, body.departments, body.projectIds);
+    if (grantError) { res.status(403).json({ success: false, error: grantError }); return; }
   }
 
   const existing = await queryOne<UserRow>(
     `SELECT * FROM users WHERE id=$1 AND deleted_at IS NULL`, [targetId]
   );
   if (!existing) { res.status(404).json({ success: false, error: 'User not found' }); return; }
+
+  // Estimation module access: only within the actor's own modules; modules the actor cannot manage are kept.
+  let nextModules: ModuleCode[] | null = null;
+  if (body.modules !== undefined) {
+    const meta = await getTargetMeta(targetId);
+    if (!isGlobalSuperAdminRoles(meta?.roles ?? [])) {   // a Global Super Admin always has every module
+      invalidateUserModules(targetId);
+      const current = await getUserModules(targetId);
+      const decision = decideModuleGrant(req.user.modules ?? [], body.modules, current);
+      if (!decision.ok) { res.status(decision.status!).json({ success: false, error: decision.error }); return; }
+      nextModules = decision.modules!;
+    }
+  }
 
   const updates: string[] = [];
   const vals: unknown[] = [];
@@ -273,12 +317,20 @@ export async function updateUser(req: Request, res: Response): Promise<void> {
     }
   }
 
-  // Update projects
-  if (body.projectIds !== undefined) {
-    await query(`DELETE FROM project_users WHERE user_id=$1`, [targetId]);
-    for (const projectId of body.projectIds) {
-      await query(`INSERT INTO project_users (project_id, user_id, assigned_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-        [projectId, targetId, req.user.userId]);
+  // Update departments + programs
+  if (body.departments !== undefined || body.projectIds !== undefined) {
+    await syncUserAccess(targetId, body.departments, body.projectIds, req.user.userId);
+  }
+
+  if (nextModules) {
+    const change = await setUserModules(targetId, nextModules, req.user.userId);
+    if (change.added.length || change.removed.length) {
+      await auditLog({
+        entity: 'user', entityId: targetId, action: 'estimation_access_updated',
+        previousValue: { modules: change.before },
+        newValue: { modules: change.after, added: change.added, removed: change.removed },
+        user: req.user, req,
+      });
     }
   }
 
@@ -292,7 +344,9 @@ export async function updateUser(req: Request, res: Response): Promise<void> {
     `SELECT u.id, u.first_name, u.last_name, u.username, u.email, u.status, u.is_active, u.updated_at,
             COALESCE(json_agg(DISTINCT r.name) FILTER (WHERE r.name IS NOT NULL), '[]') AS roles,
             COALESCE(json_agg(DISTINCT jsonb_build_object('id', p.id, 'name', p.name, 'code', p.code))
-                     FILTER (WHERE p.id IS NOT NULL), '[]') AS projects
+                     FILTER (WHERE p.id IS NOT NULL), '[]') AS projects,
+            ${USER_DEPARTMENTS_JSON},
+            ${USER_MODULES_SQL}
      FROM users u
      LEFT JOIN user_roles ur ON ur.user_id = u.id LEFT JOIN roles r ON r.id = ur.role_id
      LEFT JOIN project_users pu ON pu.user_id = u.id
@@ -300,7 +354,7 @@ export async function updateUser(req: Request, res: Response): Promise<void> {
      WHERE u.id = $1 GROUP BY u.id`,
     [targetId]
   );
-  res.json({ success: true, data: updated });
+  res.json({ success: true, data: updated && withEffectiveModules(updated) });
 }
 
 // ─── Activate / Deactivate User ───────────────────────────────────────────────

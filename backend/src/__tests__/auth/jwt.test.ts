@@ -44,6 +44,13 @@ describe('JWT utilities', () => {
       expect(decoded.userId).toBe(basePayload.userId);
     });
 
+    it('issues a unique token per call even within the same second (unique token_hash in DB)', () => {
+      const a = signRefreshToken(basePayload);
+      const b = signRefreshToken(basePayload);
+      expect(a).not.toBe(b);
+      expect((verifyRefreshToken(a) as { jti?: string }).jti).toMatch(/^[0-9a-f-]{36}$/);
+    });
+
     it('throws on tampered refresh token', () => {
       const token = signRefreshToken(basePayload);
       const tampered = token.slice(0, -3) + 'abc';

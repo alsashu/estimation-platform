@@ -1,23 +1,31 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { LayoutDashboard, Sigma, TrendingUp, Target, Percent, FileSpreadsheet, BarChart3 } from 'lucide-react';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, CartesianGrid } from 'recharts';
+import { ResponsiveContainer, Tooltip, PieChart, Pie, Cell } from 'recharts';
 import { parametricAnalysisApi, parametricEstimationsApi } from '../../services/api';
-import { useProjectStore } from '../../store/projectStore';
-import { StatCard, Card, Badge, Skeleton, Button, SPDot } from '../../components/ui';
+import { HierarchyFilterBar, usePageHierarchyFilter } from '../../components/hierarchy/HierarchyFilterBar';
+import { StatCard, Card, Badge, Button, SPDot } from '../../components/ui';
 import { fmt, cn } from '../../utils/formatters';
 import { CHART_COLORS } from '../../config/theme';
-import type { ParametricEstimation } from '../../types';
+import type { ParametricEstimation, ParametricTrendPoint } from '../../types';
+import { EstimationActivityCard, type ActivitySeries } from '../../components/dashboard/EstimationActivityCard';
+
+const PE_ACTIVITY_SERIES: ActivitySeries<ParametricTrendPoint>[] = [
+  { key: 'total', name: 'Estimations', color: { light: '#1E3246', dark: '#D2D7DC' } },
+];
+import { ParametricActualsKpis } from './ParametricActualsInsights';
+import { accuracyTone } from './ParametricActualsPanel';
 
 export default function ParametricDashboard() {
-  const { selectedProjectId } = useProjectStore();
-  const projectParam = selectedProjectId ? { projectId: selectedProjectId } : {};
-  const projectFilter = selectedProjectId ? { project_id: selectedProjectId } : {};
+  // Department + Program from the header, Baseline from the page filter
+  const { filter, setFilter, params: scope } = usePageHierarchyFilter();
+  const projectParam = scope;
+  const projectFilter = scope;
+  const scopeKey = JSON.stringify(scope);
 
-  const { data: summary, isLoading: sumLoading } = useQuery({ queryKey: ['parametric-analysis-summary', selectedProjectId], queryFn: () => parametricAnalysisApi.getSummary(projectParam), retry: false });
-  const { data: trend, isLoading: trendLoading } = useQuery({ queryKey: ['parametric-trend', selectedProjectId], queryFn: () => parametricAnalysisApi.getTrend({ days: 30, ...projectParam }), retry: false });
-  const { data: workGroups } = useQuery({ queryKey: ['parametric-work-group', selectedProjectId], queryFn: () => parametricAnalysisApi.getByWorkGroup(projectParam), retry: false });
-  const { data: recentData } = useQuery({ queryKey: ['parametric-recent', selectedProjectId], queryFn: () => parametricEstimationsApi.getAll({ limit: 8, page: 1, ...projectFilter }), retry: false });
+  const { data: summary, isLoading: sumLoading } = useQuery({ queryKey: ['parametric-analysis-summary', scopeKey], queryFn: () => parametricAnalysisApi.getSummary(projectParam), retry: false });
+  const { data: workGroups } = useQuery({ queryKey: ['parametric-work-group', scopeKey], queryFn: () => parametricAnalysisApi.getByWorkGroup(projectParam), retry: false });
+  const { data: recentData } = useQuery({ queryKey: ['parametric-recent', scopeKey], queryFn: () => parametricEstimationsApi.getAll({ limit: 8, page: 1, ...projectFilter }), retry: false });
 
   const recent: ParametricEstimation[] = recentData?.data || [];
   const workGroupPie = (workGroups || []).map((w, i) => ({ name: w.work_group, value: Number(w.count), color: CHART_COLORS[i % CHART_COLORS.length] }));
@@ -34,6 +42,8 @@ export default function ParametricDashboard() {
         <Link to="/parametric-estimation"><Button icon={<Sigma size={16} />}>New Estimate</Button></Link>
       </div>
 
+      <HierarchyFilterBar value={filter} onChange={setFilter} depth="baseline" />
+
       {/* KPI Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard label="Total Estimations" value={sumLoading ? '—' : String(summary?.total_estimations ?? 0)}
@@ -46,40 +56,24 @@ export default function ParametricDashboard() {
           icon={<FileSpreadsheet size={18} />} color="bg-gradient-danger" loading={sumLoading} />
       </div>
 
+      {/* Estimated vs Actual (PersonDays) */}
+      <ParametricActualsKpis summary={summary} loading={sumLoading} />
+
       {/* Trend + Work Group split */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <Card className="xl:col-span-2" padding="p-5">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="font-display font-semibold text-carbon dark:text-white">Estimation Activity</h2>
-              <p className="text-xs text-coolslate mt-0.5">Daily parametric estimations over the last 30 days</p>
-            </div>
-            {summary && (
-              <Badge variant={summary.detailed_basis_pct >= summary.average_basis_pct ? 'success' : 'info'}>
-                {summary.detailed_basis_pct >= summary.average_basis_pct ? 'Detailed-driven' : 'Average-driven'}
-              </Badge>
-            )}
-          </div>
-          {trendLoading ? <Skeleton className="h-48" /> : (
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={trend || []} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="peTotalGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#1E3246" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#1E3246" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(120,130,145,0.1)" />
-                <XAxis dataKey="date" tickFormatter={(v) => new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
-                  tick={{ fontSize: 11, fill: '#788291' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#788291' }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ background: '#fff', border: '1px solid #D2D7DC', borderRadius: 10, fontSize: 12 }}
-                  labelFormatter={(v) => fmt.date(v)} />
-                <Area type="monotone" dataKey="total" name="Estimations" stroke="#1E3246" strokeWidth={2} fill="url(#peTotalGrad)" />
-              </AreaChart>
-            </ResponsiveContainer>
+        <EstimationActivityCard<ParametricTrendPoint>
+          queryKey="parametric-trend"
+          scope={scope}
+          fetchActivity={parametricAnalysisApi.getActivity}
+          noun="parametric estimations"
+          series={PE_ACTIVITY_SERIES}
+          tooltipDetails={(pt) => [{ label: 'Manual', value: pt.manual }, { label: 'Excel import', value: pt.excel_import }]}
+          badge={summary && (
+            <Badge variant={summary.detailed_basis_pct >= summary.average_basis_pct ? 'success' : 'info'}>
+              {summary.detailed_basis_pct >= summary.average_basis_pct ? 'Detailed-driven' : 'Average-driven'}
+            </Badge>
           )}
-        </Card>
+        />
 
         <Card padding="p-5">
           <h2 className="font-display font-semibold text-carbon dark:text-white mb-1">Work Group Split</h2>
@@ -137,10 +131,12 @@ export default function ParametricDashboard() {
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0">
                   <div className="text-right hidden sm:block">
-                    <p className="text-xs font-semibold text-carbon dark:text-white">{Number(r.final_estimation).toFixed(2)} PD</p>
-                    <p className="text-[10px] text-coolslate">TE {Number(r.team_efficiency) * 100}%</p>
+                    <p className="text-xs font-semibold text-carbon dark:text-white">Est. {Number(r.final_estimation).toFixed(2)} PD</p>
+                    <p className="text-[10px] text-coolslate">{r.actual_days != null ? `Actual ${Number(r.actual_days).toFixed(2)} PD` : 'Actual not recorded'}</p>
                   </div>
-                  <Badge variant={r.source === 'excel_import' ? 'info' : 'neutral'}>{r.source === 'excel_import' ? 'Excel' : 'Manual'}</Badge>
+                  {r.accuracy_percent != null
+                    ? <Badge variant={accuracyTone(Number(r.accuracy_percent))}>{Number(r.accuracy_percent).toFixed(0)}% acc.</Badge>
+                    : <Badge variant={r.source === 'excel_import' ? 'info' : 'neutral'}>{r.source === 'excel_import' ? 'Excel' : 'Manual'}</Badge>}
                 </div>
               </Link>
             ))

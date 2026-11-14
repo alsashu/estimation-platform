@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
+import { modulesSchema } from './users.controller';
+import { decideModuleGrant, setUserModules } from '../services/estimationAccess.service';
 import { query, queryOne } from '../config/database';
 import { auditLog } from '../services/audit.service';
 import { createNotification } from '../services/notification.service';
@@ -75,12 +77,18 @@ export async function getPendingCount(req: Request, res: Response): Promise<void
 }
 
 // ─── Approve ──────────────────────────────────────────────────────────────────
-const approveSchema = z.object({ roleId: z.string().uuid().optional() });
+const approveSchema = z.object({
+  roleId: z.string().uuid().optional(),
+  /** Estimation Module Access for the new account — required, within the approver's own modules. */
+  modules: modulesSchema,
+});
 
 export async function approveRegistration(req: Request, res: Response): Promise<void> {
   if (!req.user) { res.status(401).json({ success: false, error: 'Not authenticated' }); return; }
 
-  const { roleId } = approveSchema.parse(req.body);
+  const { roleId, modules } = approveSchema.parse(req.body);
+  const moduleGrant = decideModuleGrant(req.user.modules ?? [], modules);
+  if (!moduleGrant.ok) { res.status(moduleGrant.status!).json({ success: false, error: moduleGrant.error }); return; }
   const regReq = await queryOne<{
     id: string; first_name: string; last_name: string; username: string;
     email: string; password_hash: string; status: string;
@@ -124,6 +132,13 @@ export async function approveRegistration(req: Request, res: Response): Promise<
     await query(`INSERT INTO project_users (project_id, user_id, assigned_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
       [regReq.requested_project_id, newUser.id, req.user.userId]);
   }
+
+  await setUserModules(newUser.id, moduleGrant.modules!, req.user.userId, 'registration');
+  await auditLog({
+    entity: 'user', entityId: newUser.id, action: 'estimation_access_granted',
+    previousValue: { modules: [] }, newValue: { modules: moduleGrant.modules, via: 'registration' },
+    user: req.user, req,
+  });
 
   // Update request status
   await query(

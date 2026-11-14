@@ -1,30 +1,14 @@
 import { Request, Response } from 'express';
 import { query } from '../config/database';
+import { applyHierarchyScope } from '../services/hierarchy.service';
+import { resolveActivityRange, activitySql, activityMeta } from '../services/activityRange';
 
+/**
+ * Department / Program / Baseline / Component / Subcomponent filters + access scoping.
+ * Shared with every SP and PE report so dashboards, history and analytics filter identically.
+ */
 function addProjectFilter(req: Request, where: string, params: unknown[], i: number): [string, unknown[], number] {
-  const selectedProjectId = req.query.projectId as string | undefined;
-
-  if (selectedProjectId) {
-    // Validate user has access to the requested project
-    if (req.user && req.user.projectIds !== '*') {
-      const ids = req.user.projectIds as string[];
-      if (!ids.includes(selectedProjectId)) {
-        where += ` AND 1=0`; // no access
-        return [where, params, i];
-      }
-    }
-    where += ` AND project_id = $${i++}`;
-    params.push(selectedProjectId);
-  } else if (req.user && req.user.projectIds !== '*') {
-    const ids = req.user.projectIds as string[];
-    if (ids.length > 0) {
-      where += ` AND project_id = ANY($${i++}::uuid[])`;
-      params.push(ids);
-    } else {
-      where += ` AND 1=0`;
-    }
-  }
-  return [where, params, i];
+  return applyHierarchyScope(req, where, params, i);
 }
 
 export async function getSummary(req: Request, res: Response): Promise<void> {
@@ -147,23 +131,45 @@ export async function getScatterData(req: Request, res: Response): Promise<void>
   res.json({ success: true, data });
 }
 
+/**
+ * Estimation Activity (Dashboard SP). Buckets by creation date ("total") and by completion date
+ * ("completed") over a From/To range in the caller's time zone; filtering happens in SQL.
+ */
 export async function getTrend(req: Request, res: Response): Promise<void> {
-  const { days = 30 } = req.query;
+  const r = resolveActivityRange(req.query as Record<string, unknown>);
+  if (!r.ok) { res.status(400).json({ success: false, error: r.error }); return; }
+
+  let where = 'WHERE 1=1';
   let params: unknown[] = [];
-  let where = `WHERE COALESCE(completed_at, created_at) >= NOW() - INTERVAL '${parseInt(String(days))} days'`;
   let i = 1;
-  [where, params, i] = addProjectFilter(req, where, params, i);
+  [where, params, i] = applyHierarchyScope(req, where, params, i, 'e.');
+  const s = activitySql(r.range, params, i);
 
   const data = await query(
-    `SELECT DATE_TRUNC('day', COALESCE(completed_at, created_at)) as date,
-            COUNT(*) as total,
-            COUNT(*) FILTER (WHERE status='completed') as completed,
-            COALESCE(AVG(accuracy_percent) FILTER (WHERE status='completed'), 0) as avg_accuracy
-     FROM estimations
-     ${where}
-     GROUP BY DATE_TRUNC('day', COALESCE(completed_at, created_at))
-     ORDER BY date`,
+    `WITH ${s.ctes},
+      created AS (
+        SELECT ${s.bucketOf('e.created_at')} AS bucket, COUNT(*) AS total
+        FROM estimations e CROSS JOIN bounds b
+        ${where} AND ${s.inRange('e.created_at')}
+        GROUP BY 1
+      ),
+      completed AS (
+        SELECT ${s.bucketOf('e.completed_at')} AS bucket, COUNT(*) AS completed,
+               AVG(e.accuracy_percent) AS avg_accuracy
+        FROM estimations e CROSS JOIN bounds b
+        ${where} AND e.status = 'completed' AND e.completed_at IS NOT NULL AND ${s.inRange('e.completed_at')}
+        GROUP BY 1
+      )
+     SELECT ${s.periodCols},
+            COALESCE(c.total, 0)::int AS total,
+            COALESCE(d.completed, 0)::int AS completed,
+            COALESCE(ROUND(d.avg_accuracy::numeric, 2), 0)::float AS avg_accuracy
+     FROM buckets k
+     CROSS JOIN bounds b
+     LEFT JOIN created c ON c.bucket = k.bucket
+     LEFT JOIN completed d ON d.bucket = k.bucket
+     ORDER BY k.bucket`,
     params
   );
-  res.json({ success: true, data });
+  res.json({ success: true, data, meta: activityMeta(r.range) });
 }

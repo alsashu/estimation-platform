@@ -1,6 +1,18 @@
 import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 
+// jsdom has no matchMedia; the theme store reads it at import time
+if (!window.matchMedia) {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: (query: string) => ({
+      matches: false, media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(),
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }),
+  });
+}
+
 // Mock axios to prevent real HTTP calls in tests
 vi.mock('axios', () => ({
   default: {
@@ -28,3 +40,10 @@ vi.mock('framer-motion', () => ({
   AnimatePresence: ({ children }: { children: unknown }) => children,
   useAnimation: vi.fn(),
 }));
+
+// recharts' ResponsiveContainer needs ResizeObserver, which jsdom lacks.
+if (!('ResizeObserver' in globalThis)) {
+  (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+    observe() {} unobserve() {} disconnect() {}
+  };
+}

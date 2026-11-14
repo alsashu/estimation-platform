@@ -1,33 +1,71 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users, Plus, Search, CheckCircle, XCircle, Loader2, Key, Edit2, Trash2, RefreshCw } from 'lucide-react';
-import { usersApi, rolesApi, projectsApi, authApi } from '../../services/api';
+import { usersApi, rolesApi, projectsApi, departmentsApi, authApi } from '../../services/api';
+import type { DepartmentGrant } from '../../services/api';
 import type { UserRecord } from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
 import { useToastStore } from '../../store';
 import { MultiSelect } from '../../components/ui';
 import { fmt } from '../../utils/formatters';
+import { EstimationModuleAccessField } from '../../components/access/EstimationModuleAccessField';
+import { normalizeModules, validateModuleSelection, type ModuleCode } from '../../utils/moduleAccess';
+import { syncAccessFromServer } from '../../services/api';
 
 // ─── Shared form fields ───────────────────────────────────────────────────────
 
 const INPUT = 'w-full px-3 py-2 rounded-lg border border-lgrayblue/40 dark:border-slate-600 bg-white dark:bg-carbon-700 text-carbon dark:text-white text-sm focus:outline-none focus:ring-1 focus:ring-carbon/30';
 const LABEL = 'text-xs font-medium text-coolslate uppercase tracking-wide block mb-1';
 
+type UserForm = {
+  firstName: string; lastName: string; username: string; email: string; password: string;
+  roleIds: string[]; projectIds: string[]; departments: DepartmentGrant[];
+  /** Estimation Module Access (SP / PE) — independent of the role. */
+  modules: ModuleCode[];
+};
+
+interface ModuleFieldContext {
+  actorModules: ModuleCode[];
+  targetModules?: ModuleCode[];
+  targetIsGlobalSuperAdmin?: boolean;
+  showErrors: boolean;
+}
+
 function UserFormFields({
-  form, setForm, roles, projectsList, generatingPass, onGeneratePass,
+  form, setForm, roles, projectsList, departmentsList, generatingPass, onGeneratePass, moduleCtx,
 }: {
-  form: { firstName: string; lastName: string; username: string; email: string; password: string; roleIds: string[]; projectIds: string[] };
-  setForm: React.Dispatch<React.SetStateAction<typeof form>>;
+  moduleCtx: ModuleFieldContext;
+  form: UserForm;
+  setForm: React.Dispatch<React.SetStateAction<UserForm>>;
   roles: { id: string; name: string; description?: string }[];
-  projectsList: { id: string; name: string; code?: string; description?: string }[];
+  projectsList: { id: string; name: string; code?: string; description?: string; department_id?: string; department_name?: string }[];
+  departmentsList: { id: string; name: string; code: string }[];
   generatingPass: boolean;
   onGeneratePass: () => void;
 }) {
   const roleOptions = roles.map(r => ({ id: r.id, label: r.name, description: r.description }));
-  const projectOptions = projectsList.map(p => ({
-    id: p.id,
-    label: p.name,
-    description: p.code ? `Code: ${p.code}` : p.description,
+  const departmentOptions = departmentsList.map(d => ({ id: d.id, label: d.name, description: `Code: ${d.code}` }));
+  const selectedDeptIds = form.departments.map(d => d.id);
+  // Program access must respect its parent department: only programs of selected departments are offered
+  const projectOptions = projectsList
+    .filter(p => !p.department_id || selectedDeptIds.includes(p.department_id))
+    .map(p => ({
+      id: p.id,
+      label: p.name,
+      description: [p.department_name, p.code && `Code: ${p.code}`].filter(Boolean).join(' · ') || p.description,
+    }));
+
+  const setDepartments = (ids: string[]) => setForm(f => {
+    const departments = ids.map(id => f.departments.find(d => d.id === id) ?? { id, access_scope: 'assigned' as const });
+    const allowed = new Set(ids);
+    const projectIds = f.projectIds.filter(pid => {
+      const dep = projectsList.find(p => p.id === pid)?.department_id;
+      return !dep || allowed.has(dep);
+    });
+    return { ...f, departments, projectIds };
+  });
+  const setScope = (id: string, all: boolean) => setForm(f => ({
+    ...f, departments: f.departments.map(d => d.id === id ? { ...d, access_scope: all ? 'all' : 'assigned' } : d),
   }));
 
   return (
@@ -67,15 +105,48 @@ function UserFormFields({
           emptyMessage="No roles found"
         />
       </div>
-      {projectOptions.length > 0 && (
+      <EstimationModuleAccessField
+        value={form.modules}
+        onChange={modules => setForm(p => ({ ...p, modules }))}
+        actorModules={moduleCtx.actorModules}
+        targetModules={moduleCtx.targetModules}
+        targetIsGlobalSuperAdmin={moduleCtx.targetIsGlobalSuperAdmin}
+        showErrors={moduleCtx.showErrors}
+      />
+      {departmentOptions.length > 0 && (
         <div>
-          <label className={LABEL}>Projects</label>
+          <label className={LABEL}>Departments</label>
+          <MultiSelect
+            options={departmentOptions}
+            selected={selectedDeptIds}
+            onChange={setDepartments}
+            placeholder="Select departments…"
+            emptyMessage="No departments found"
+          />
+          {form.departments.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {form.departments.map(d => (
+                <li key={d.id} className="flex items-center justify-between text-xs px-2 py-1.5 rounded-md bg-lgrayblue/15 dark:bg-slate-800/40">
+                  <span className="text-carbon dark:text-white">{departmentsList.find(x => x.id === d.id)?.name ?? 'Department'}</span>
+                  <label className="flex items-center gap-1.5 text-coolslate cursor-pointer">
+                    <input type="checkbox" checked={d.access_scope === 'all'} onChange={e => setScope(d.id, e.target.checked)} />
+                    All programs (department-level access)
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {projectsList.length > 0 && (
+        <div>
+          <label className={LABEL}>Programs</label>
           <MultiSelect
             options={projectOptions}
             selected={form.projectIds}
             onChange={ids => setForm(p => ({ ...p, projectIds: ids }))}
-            placeholder="Select projects…"
-            emptyMessage="No projects found"
+            placeholder={selectedDeptIds.length ? 'Select programs…' : 'Select a department first'}
+            emptyMessage={selectedDeptIds.length ? 'No programs in the selected departments' : 'Select a department first'}
           />
         </div>
       )}
@@ -89,9 +160,13 @@ function CreateUserModal({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const { addToast } = useToastStore();
   const { data: roles = [] } = useQuery({ queryKey: ['roles'], queryFn: () => rolesApi.list() });
-  const { data: projectsData } = useQuery({ queryKey: ['projects-all'], queryFn: () => projectsApi.list({ limit: 200 }) });
+  const { data: projectsData } = useQuery({ queryKey: ['projects-all'], queryFn: () => projectsApi.list({ limit: 500 }) });
+  const { data: departmentsData } = useQuery({ queryKey: ['departments', 'options', 'user-form'], queryFn: () => departmentsApi.list() });
   const [generatingPass, setGeneratingPass] = useState(false);
-  const [form, setForm] = useState({ firstName: '', lastName: '', username: '', email: '', password: '', roleIds: [] as string[], projectIds: [] as string[] });
+  const actorModules = useAuthStore(st => st.getModules());
+  const [tried, setTried] = useState(false);
+  const [form, setForm] = useState<UserForm>({ firstName: '', lastName: '', username: '', email: '', password: '', roleIds: [], projectIds: [], departments: [], modules: [] });
+  const moduleError = validateModuleSelection(form.modules, actorModules);
 
   const mut = useMutation({
     mutationFn: () => usersApi.create(form),
@@ -113,12 +188,13 @@ function CreateUserModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="text-coolslate hover:text-carbon dark:hover:text-white"><XCircle size={18} /></button>
         </div>
         <div className="p-6">
-          <UserFormFields form={form} setForm={setForm} roles={roles} projectsList={projectsData?.data ?? []}
-            generatingPass={generatingPass} onGeneratePass={generatePass} />
+          <UserFormFields form={form} setForm={setForm} roles={roles} projectsList={projectsData?.data ?? []} departmentsList={departmentsData?.data ?? []}
+            generatingPass={generatingPass} onGeneratePass={generatePass}
+            moduleCtx={{ actorModules, showErrors: tried }} />
         </div>
         <div className="flex justify-end gap-3 px-6 pb-6">
           <button onClick={onClose} className="px-4 py-2 text-sm text-coolslate hover:text-carbon dark:hover:text-white">Cancel</button>
-          <button onClick={() => mut.mutate()} disabled={mut.isPending || !form.firstName || !form.email || !form.password}
+          <button onClick={() => { setTried(true); if (!moduleError) mut.mutate(); }} disabled={mut.isPending || !form.firstName || !form.email || !form.password}
             className="px-4 py-2 bg-carbon dark:bg-white text-white dark:text-carbon rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5">
             {mut.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Create User
           </button>
@@ -134,31 +210,55 @@ function EditUserModal({ user, onClose }: { user: UserRecord; onClose: () => voi
   const qc = useQueryClient();
   const { addToast } = useToastStore();
   const { data: roles = [] } = useQuery({ queryKey: ['roles'], queryFn: () => rolesApi.list() });
-  const { data: projectsData } = useQuery({ queryKey: ['projects-all'], queryFn: () => projectsApi.list({ limit: 200 }) });
+  const { data: projectsData } = useQuery({ queryKey: ['projects-all'], queryFn: () => projectsApi.list({ limit: 500 }) });
+  const { data: departmentsData } = useQuery({ queryKey: ['departments', 'options', 'user-form'], queryFn: () => departmentsApi.list() });
   const { data: fullUser } = useQuery({ queryKey: ['user', user.id], queryFn: () => usersApi.get(user.id) });
   const [generatingPass, setGeneratingPass] = useState(false);
 
   const resolvedRoleIds = roles.filter(r => user.roles.includes(r.name)).map(r => r.id);
+  const actorModules = useAuthStore(st => st.getModules());
+  const currentUserId = useAuthStore(st => st.user?.id);
+  const [tried, setTried] = useState(false);
+  const targetModules = normalizeModules(fullUser?.estimation_modules ?? user.estimation_modules);
+  const targetIsGlobalSuperAdmin = (fullUser?.roles ?? user.roles ?? [])
+    .some(r => (typeof r === 'string' ? r : (r as { name: string }).name) === 'Global Super Admin');
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<UserForm>({
     firstName: user.first_name,
     lastName: user.last_name,
     username: user.username,
     email: user.email,
     password: '',
     roleIds: resolvedRoleIds,
-    projectIds: [] as string[],
+    projectIds: [],
+    departments: [],
+    // previously assigned modules the actor can manage; the rest stay locked (kept server-side)
+    modules: normalizeModules(user.estimation_modules).filter(m => actorModules.includes(m)),
   });
+  const moduleError = targetIsGlobalSuperAdmin ? null : validateModuleSelection(form.modules, actorModules, targetModules);
 
   // Sync project IDs once both full user AND accessible projects are loaded.
   // Filter to only projects visible to the requester — prevents submitting
   // projects outside the admin's scope that would be rejected by the backend.
   const [projectsInitialized, setProjectsInitialized] = useState(false);
-  if (fullUser && projectsData && !projectsInitialized) {
+  if (fullUser && projectsData && departmentsData && !projectsInitialized) {
     const accessible = new Set(projectsData.data.map(p => p.id));
+    const accessibleDepts = new Set(departmentsData.data.map(d => d.id));
     const filtered = (fullUser.projects?.map(p => p.id) ?? []).filter(id => accessible.has(id));
-    setForm(f => ({ ...f, projectIds: filtered }));
+    const departments = (fullUser.departments ?? [])
+      .filter(d => accessibleDepts.has(d.id))
+      .map(d => ({ id: d.id, access_scope: d.access_scope }));
+    const modules = normalizeModules(fullUser.estimation_modules).filter(m => actorModules.includes(m));
+    setForm(f => ({ ...f, projectIds: filtered, departments, modules }));
     setProjectsInitialized(true);
+  }
+
+  // Roles load asynchronously: resolve the user's role ids once they arrive, otherwise the form would start
+  // with no roles and saving would remove all of the user's roles.
+  const [rolesInitialized, setRolesInitialized] = useState(resolvedRoleIds.length > 0 || user.roles.length === 0);
+  if (!rolesInitialized && roles.length > 0) {
+    setForm(f => ({ ...f, roleIds: resolvedRoleIds }));
+    setRolesInitialized(true);
   }
 
   const mut = useMutation({
@@ -169,9 +269,17 @@ function EditUserModal({ user, onClose }: { user: UserRecord; onClose: () => voi
       email: form.email,
       roleIds: form.roleIds,
       projectIds: form.projectIds,
+      departments: form.departments,
+      ...(targetIsGlobalSuperAdmin ? {} : { modules: form.modules }),
       ...(form.password ? { password: form.password } : {}),
     }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); addToast({ type: 'success', title: 'User updated' }); onClose(); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      qc.invalidateQueries({ queryKey: ['user', user.id] });
+      addToast({ type: 'success', title: 'User updated' });
+      if (user.id === currentUserId) void syncAccessFromServer();   // own access changed → refresh nav now
+      onClose();
+    },
     onError: (e: Error) => addToast({ type: 'error', title: e.message }),
   });
 
@@ -192,12 +300,13 @@ function EditUserModal({ user, onClose }: { user: UserRecord; onClose: () => voi
           <button onClick={onClose} className="text-coolslate hover:text-carbon dark:hover:text-white"><XCircle size={18} /></button>
         </div>
         <div className="p-6">
-          <UserFormFields form={form} setForm={setForm} roles={roles} projectsList={projectsData?.data ?? []}
-            generatingPass={generatingPass} onGeneratePass={generatePass} />
+          <UserFormFields form={form} setForm={setForm} roles={roles} projectsList={projectsData?.data ?? []} departmentsList={departmentsData?.data ?? []}
+            generatingPass={generatingPass} onGeneratePass={generatePass}
+            moduleCtx={{ actorModules, targetModules, targetIsGlobalSuperAdmin, showErrors: tried }} />
         </div>
         <div className="flex justify-end gap-3 px-6 pb-6">
           <button onClick={onClose} className="px-4 py-2 text-sm text-coolslate hover:text-carbon dark:hover:text-white">Cancel</button>
-          <button onClick={() => mut.mutate()} disabled={mut.isPending || !form.firstName || !form.email}
+          <button onClick={() => { setTried(true); if (!moduleError) mut.mutate(); }} disabled={mut.isPending || !form.firstName || !form.email || !fullUser || !rolesInitialized}
             className="px-4 py-2 bg-carbon dark:bg-white text-white dark:text-carbon rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5">
             {mut.isPending ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Save Changes
           </button>
@@ -278,7 +387,7 @@ export default function UsersPage() {
             <table className="w-full text-sm">
               <thead className="border-b border-lgrayblue/30 dark:border-slate-700">
                 <tr className="text-left">
-                  {['User', 'Roles', 'Projects', 'Status', 'Last Login', 'Actions'].map(h => (
+                  {['User', 'Roles', 'Modules', 'Programs', 'Status', 'Last Login', 'Actions'].map(h => (
                     <th key={h} className="px-5 py-3.5 text-xs font-semibold text-coolslate uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
@@ -303,6 +412,16 @@ export default function UsersPage() {
                         {(u.roles ?? []).map(r => (
                           <span key={r} className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${getRoleBadgeColor(r)}`}>{r}</span>
                         ))}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5" data-testid="user-modules">
+                      <div className="flex flex-wrap gap-1">
+                        {normalizeModules(u.estimation_modules).length > 0
+                          ? normalizeModules(u.estimation_modules).map(m => (
+                            <span key={m} title={m === 'SP' ? 'Story Point Estimation' : 'Parametric Estimation'}
+                              className="text-[10px] px-2 py-0.5 rounded-full font-semibold border border-carbon/20 dark:border-lgrayblue/30 text-carbon dark:text-lgrayblue">{m}</span>
+                          ))
+                          : <span className="text-[10px] text-vibrant">None</span>}
                       </div>
                     </td>
                     <td className="px-5 py-3.5">

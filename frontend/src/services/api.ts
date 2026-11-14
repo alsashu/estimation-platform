@@ -1,18 +1,25 @@
 import axios, { AxiosError } from 'axios';
+import { normalizeModules, type ModuleCode } from '../utils/moduleAccess';
 import type {
   Estimation, StoryPointConfig, EffortEstimateConfig,
   CompetencyOverheadConfig, CompetencyLevelDefinition,
   ComplexityDefinition, RiskDefinition, Notification,
   CalculationResult, PaginatedResponse, AnalysisSummary,
-  ComplexityBreakdown, SPBandSummary, ScatterPoint, TrendPoint,
+  ComplexityBreakdown, SPBandSummary, ScatterPoint, TrendPoint, ActivityResponse,
   ParametricAverageConfig, ParametricExpertConfig, ParametricEstimation,
   ParametricCalculationResult, ParametricSize,
   ParametricAnalysisSummary, ParametricSizeDistribution, ParametricWorkGroupBreakdown,
-  ParametricConfigBreakdown, ParametricTrendPoint,
+  ParametricConfigBreakdown, ParametricTrendPoint, ParametricActualsAnalysis,
+  Department, DepartmentUser, Baseline, HierarchyOption, HierarchyContext,
+  EffortGroupBy, EffortResponse,
 } from '../types';
 import { useConnectionStore, useSyncQueueStore } from '../store';
 import { useAuthStore } from '../store/authStore';
 import type { SyncQueueItem } from '../store';
+import type {
+  PerformanceDashboard, GroupRow as PerfGroupRow, PerfGroupBy, HistoricalBaseline as PerfHistoricalBaseline,
+  HistoricalBaselineInput, KpiSettings, SnapshotSummary,
+} from '../modules/performance/types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -71,9 +78,38 @@ function onRefreshed(token: string) {
   refreshSubscribers = [];
 }
 
+// ─── Live module access: the server flags responses when the caller's SP / PE access changed ──
+// The header carries the LIVE module list ("SP,PE" | "PE" | "none"). We only reload /auth/me when it differs
+// from what the store holds — no token rotation here (a rotation cut off by navigation would strand a revoked
+// refresh token). The normal refresh flow later issues a token with the new modules.
+let accessSync: Promise<void> | null = null;
+export function syncAccessFromServer(): Promise<void> {
+  if (accessSync) return accessSync;
+  accessSync = (async () => {
+    try {
+      const me = await authApi.me();
+      useAuthStore.getState().setUser({ permissions: me.permissions, modules: me.modules ?? [], roles: me.roles });
+    } catch { /* retried on the next flagged response */ }
+  })().finally(() => { accessSync = null; });
+  return accessSync;
+}
+/** Parses the header; returns the live modules when they differ from the store, else null. */
+export function changedModules(headers: unknown): ModuleCode[] | null {
+  const raw = (headers as Record<string, unknown> | undefined)?.['x-access-changed'];
+  if (typeof raw !== 'string' || !raw) return null;
+  const live = normalizeModules(raw === 'none' ? [] : raw.split(','));
+  const held = useAuthStore.getState().getModules();
+  return live.join(',') === held.join(',') ? null : live;
+}
+const onAccessHeader = (headers: unknown) => { if (changedModules(headers)) void syncAccessFromServer(); };
+
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    onAccessHeader(res.headers);
+    return res;
+  },
   async (err: AxiosError) => {
+    onAccessHeader(err.response?.headers);
     const original = err.config as typeof err.config & { _retry?: boolean };
 
     if (err.response?.status === 401 && !original?._retry && original?.url !== '/auth/refresh') {
@@ -157,8 +193,13 @@ export interface UserRecord {
   email: string; status: string; is_active: boolean;
   last_login_at?: string; created_at: string; updated_at: string;
   roles: string[];
-  projects?: { id: string; name: string; code: string }[];
+  projects?: { id: string; name: string; code: string; department_id?: string }[];
+  departments?: { id: string; name: string; code: string; access_scope: 'assigned' | 'all' }[];
+  /** Active estimation modules (SP / PE). A Global Super Admin always has both. */
+  estimation_modules?: ModuleCode[];
 }
+
+export interface DepartmentGrant { id: string; access_scope: 'assigned' | 'all' }
 
 export const usersApi = {
   list: (params?: Record<string, unknown>) =>
@@ -167,9 +208,9 @@ export const usersApi = {
     api.get<{ success: boolean; data: UserRecord }>(`/users/${id}`).then(r => r.data.data!),
   create: (body: {
     firstName: string; lastName: string; username: string; email: string; password: string;
-    roleIds?: string[]; projectIds?: string[];
+    roleIds?: string[]; projectIds?: string[]; departments?: DepartmentGrant[]; modules: ModuleCode[];
   }) => api.post<{ success: boolean; data: UserRecord }>('/users', body).then(r => r.data.data!),
-  update: (id: string, body: Partial<{ firstName: string; lastName: string; username: string; email: string; password: string; roleIds: string[]; projectIds: string[] }>) =>
+  update: (id: string, body: Partial<{ firstName: string; lastName: string; username: string; email: string; password: string; roleIds: string[]; projectIds: string[]; departments: DepartmentGrant[]; modules: ModuleCode[] }>) =>
     api.put<{ success: boolean; data: UserRecord }>(`/users/${id}`, body).then(r => r.data.data!),
   setActive: (id: string, active: boolean) =>
     api.patch(`/users/${id}/active`, { active }).then(r => r.data),
@@ -179,9 +220,12 @@ export const usersApi = {
     api.post(`/users/${id}/reset-password`, { newPassword }).then(r => r.data),
 };
 
-// ─── Projects ─────────────────────────────────────────────────────────────────
+// ─── Programs (formerly "Projects") ───────────────────────────────────────────
 export interface ProjectRecord {
   id: string; name: string; code?: string; description?: string;
+  department_id: string; department_name?: string; department_code?: string;
+  baseline_count?: number; parametric_estimation_count?: number;
+  baselines?: { id: string; name: string; version?: string; status: string; is_legacy: boolean }[];
   status: string; created_at: string; user_count?: number; estimation_count?: number;
   users?: { id: string; name: string; email: string; username: string }[];
   parametric_average_config_id?: string | null;
@@ -192,20 +236,100 @@ export interface ProjectRecord {
 
 export const projectsApi = {
   list: (params?: Record<string, unknown>) =>
-    api.get<PaginatedResponse<ProjectRecord>>('/projects', { params }).then(r => r.data),
+    api.get<PaginatedResponse<ProjectRecord>>('/programs', { params }).then(r => r.data),
   get: (id: string) =>
-    api.get<{ success: boolean; data: ProjectRecord }>(`/projects/${id}`).then(r => r.data.data!),
-  create: (body: { name: string; description?: string; code?: string; status?: string }) =>
-    api.post<{ success: boolean; data: ProjectRecord }>('/projects', body).then(r => r.data.data!),
-  update: (id: string, body: Partial<{ name: string; description: string; code: string; status: string }>) =>
-    api.put<{ success: boolean; data: ProjectRecord }>(`/projects/${id}`, body).then(r => r.data.data!),
+    api.get<{ success: boolean; data: ProjectRecord }>(`/programs/${id}`).then(r => r.data.data!),
+  create: (body: { department_id: string; name: string; description?: string; code?: string; status?: string }) =>
+    api.post<{ success: boolean; data: ProjectRecord }>('/programs', body).then(r => r.data.data!),
+  update: (id: string, body: Partial<{ department_id: string; name: string; description: string; code: string; status: string }>) =>
+    api.put<{ success: boolean; data: ProjectRecord }>(`/programs/${id}`, body).then(r => r.data.data!),
   delete: (id: string) =>
-    api.delete(`/projects/${id}`).then(r => r.data),
+    api.delete(`/programs/${id}`).then(r => r.data),
   assignUsers: (id: string, userIds: string[]) =>
-    api.post(`/projects/${id}/users`, { userIds }).then(r => r.data),
+    api.post(`/programs/${id}/users`, { userIds }).then(r => r.data),
   removeUser: (id: string, userId: string) =>
-    api.delete(`/projects/${id}/users/${userId}`).then(r => r.data),
+    api.delete(`/programs/${id}/users/${userId}`).then(r => r.data),
 };
+
+/** Preferred name — Programs replace Projects throughout the UI. */
+export type ProgramRecord = ProjectRecord;
+export const programsApi = projectsApi;
+
+// ─── Organisational hierarchy ─────────────────────────────────────────────────
+export const departmentsApi = {
+  list: (params?: Record<string, unknown>) =>
+    api.get<{ success: boolean; data: Department[]; total: number }>('/departments', { params }).then(r => r.data),
+  get: (id: string) =>
+    api.get<{ success: boolean; data: Department }>(`/departments/${id}`).then(r => r.data.data!),
+  create: (body: { name: string; code: string; description?: string; status?: string }) =>
+    api.post<{ success: boolean; data: Department }>('/departments', body).then(r => r.data.data!),
+  update: (id: string, body: Partial<{ name: string; code: string; description: string; status: string }>) =>
+    api.put<{ success: boolean; data: Department }>(`/departments/${id}`, body).then(r => r.data.data!),
+  setStatus: (id: string, status: 'active' | 'inactive') =>
+    api.patch<{ success: boolean; data: Department }>(`/departments/${id}/status`, { status }).then(r => r.data.data!),
+  listUsers: (id: string) =>
+    api.get<{ success: boolean; data: DepartmentUser[] }>(`/departments/${id}/users`).then(r => r.data.data!),
+  assignUsers: (id: string, userIds: string[], access_scope: 'assigned' | 'all') =>
+    api.post(`/departments/${id}/users`, { userIds, access_scope }).then(r => r.data),
+  removeUser: (id: string, userId: string) =>
+    api.delete(`/departments/${id}/users/${userId}`).then(r => r.data),
+};
+
+export interface BaselineInput {
+  program_id: string; department_id?: string; name: string; version?: string | null; description?: string | null;
+  start_date?: string | null; end_date?: string | null; status?: 'active' | 'inactive';
+}
+
+export const baselinesApi = {
+  list: (params?: Record<string, unknown>) =>
+    api.get<{ success: boolean; data: Baseline[]; total: number }>('/baselines', { params }).then(r => r.data),
+  get: (id: string) =>
+    api.get<{ success: boolean; data: Baseline }>(`/baselines/${id}`).then(r => r.data.data!),
+  create: (body: BaselineInput) =>
+    api.post<{ success: boolean; data: Baseline }>('/baselines', body).then(r => r.data.data!),
+  update: (id: string, body: Partial<Omit<BaselineInput, 'program_id' | 'department_id'>>) =>
+    api.put<{ success: boolean; data: Baseline }>(`/baselines/${id}`, body).then(r => r.data.data!),
+  setStatus: (id: string, status: 'active' | 'inactive') =>
+    api.patch(`/baselines/${id}/status`, { status }).then(r => r.data),
+  delete: (id: string) => api.delete(`/baselines/${id}`).then(r => r.data),
+
+  createComponent: (body: { baseline_id: string; name: string; description?: string }) =>
+    api.post('/components', body).then(r => r.data.data),
+  updateComponent: (id: string, body: { name?: string; description?: string | null }) =>
+    api.put(`/components/${id}`, body).then(r => r.data.data),
+  deleteComponent: (id: string) => api.delete(`/components/${id}`).then(r => r.data),
+
+  createSubcomponent: (body: { component_id: string; name: string; description?: string }) =>
+    api.post('/subcomponents', body).then(r => r.data.data),
+  updateSubcomponent: (id: string, body: { name?: string; description?: string | null }) =>
+    api.put(`/subcomponents/${id}`, body).then(r => r.data.data),
+  deleteSubcomponent: (id: string) => api.delete(`/subcomponents/${id}`).then(r => r.data),
+};
+
+type Lookup = { success: boolean; data: HierarchyOption[] };
+const lookup = (path: string, params: Record<string, unknown>) =>
+  api.get<Lookup>(`/hierarchy/lookup/${path}`, { params }).then(r => r.data.data);
+
+/** Permission-filtered data for the header context and cascading dropdowns. */
+export const hierarchyApi = {
+  context: () => api.get<{ success: boolean; data: HierarchyContext }>('/hierarchy/context').then(r => r.data.data),
+  departments: (search?: string) => lookup('departments', { search }),
+  programs: (departmentId: string, search?: string) => lookup('programs', { departmentId, search }),
+  baselines: (programId: string, search?: string) => lookup('baselines', { programId, search }),
+  components: (baselineId: string, search?: string) => lookup('components', { baselineId, search }),
+  subcomponents: (componentId: string, search?: string) => lookup('subcomponents', { componentId, search }),
+  effort: (params: { module: 'sp' | 'pe'; groupBy: EffortGroupBy } & Record<string, unknown>) =>
+    api.get<EffortResponse>('/hierarchy/effort', { params }).then(r => r.data),
+};
+
+/** Hierarchy ids sent with task create / import / re-assignment. */
+export interface TaskHierarchyPayload {
+  department_id: string;
+  program_id: string;
+  baseline_id: string;
+  component_id?: string | null;
+  subcomponent_id?: string | null;
+}
 
 // ─── Roles & Permissions ──────────────────────────────────────────────────────
 export interface RoleRecord {
@@ -247,8 +371,8 @@ export const registrationsApi = {
     api.get<PaginatedResponse<RegistrationRequest>>('/registrations', { params }).then(r => r.data),
   getPendingCount: () =>
     api.get<{ success: boolean; data: { count: number } }>('/registrations/pending-count').then(r => r.data.data!),
-  approve: (id: string, roleId?: string) =>
-    api.post(`/registrations/${id}/approve`, { roleId }).then(r => r.data),
+  approve: (id: string, modules: ModuleCode[], roleId?: string) =>
+    api.post(`/registrations/${id}/approve`, { roleId, modules }).then(r => r.data),
   reject: (id: string, reason: string) =>
     api.post(`/registrations/${id}/reject`, { reason }).then(r => r.data),
 };
@@ -264,12 +388,12 @@ export const estimationsApi = {
   getById: (id: string) =>
     api.get<{ success: boolean; data: Estimation }>(`/estimations/${id}`).then(r => r.data.data!),
 
-  create: (body: {
-    title: string; description?: string; project_name?: string; project_id?: string;
+  create: (body: TaskHierarchyPayload & {
+    title: string; description?: string;
     complexity: string; risk: string; competency: string; work_group: string; notes?: string;
   }) => api.post<{ success: boolean; data: Estimation }>('/estimations', body).then(r => r.data.data!),
 
-  update: (id: string, body: Partial<Estimation>) =>
+  update: (id: string, body: Partial<TaskHierarchyPayload & { title: string; description: string | null; notes: string | null }>) =>
     api.put<{ success: boolean; data: Estimation }>(`/estimations/${id}`, body).then(r => r.data.data!),
 
   recordActuals: (id: string, body: { estimated_hours?: number; actual_hours?: number; completed_at?: string; notes?: string }) =>
@@ -278,8 +402,8 @@ export const estimationsApi = {
   delete: (id: string) =>
     api.delete<{ success: boolean }>(`/estimations/${id}`).then(r => r.data),
 
-  batchImport: (rows: { title: string; project_name?: string; project_id?: string; description?: string; complexity: string; risk: string; competency: string; work_group: string; notes?: string }[]) =>
-    api.post<{ success: boolean; created: number; errors: { row: number; error: string }[] }>('/estimations/import', { rows }).then(r => r.data),
+  batchImport: (hierarchy: TaskHierarchyPayload, rows: { title: string; description?: string; complexity: string; risk: string; competency: string; work_group: string; notes?: string }[]) =>
+    api.post<{ success: boolean; created: number; errors: { row: number; error: string }[] }>('/estimations/import', { hierarchy, rows }).then(r => r.data),
 };
 
 // ─── Master Data ──────────────────────────────────────────────────────────────
@@ -352,12 +476,12 @@ export const parametricMasterApi = {
     api.delete(`/parametric/expert-configs/${id}`).then(r => r.data),
 
   setProjectConfig: (projectId: string, body: { parametric_average_config_id?: string | null; parametric_expert_config_id?: string | null }) =>
-    api.patch(`/projects/${projectId}/parametric-config`, body).then(r => r.data),
+    api.patch(`/programs/${projectId}/parametric-config`, body).then(r => r.data),
 };
 
 // ─── Parametric Estimation ────────────────────────────────────────────────────────
 export const parametricEstimationsApi = {
-  calculate: (body: ParametricInputs & { project_id?: string }) =>
+  calculate: (body: ParametricInputs & { program_id?: string }) =>
     api.post<{ success: boolean; data: ParametricCalculationResult }>('/parametric-estimations/calculate', body).then(r => r.data.data!),
 
   getAll: (params?: Record<string, unknown>) =>
@@ -366,14 +490,21 @@ export const parametricEstimationsApi = {
   getById: (id: string) =>
     api.get<{ success: boolean; data: ParametricEstimation }>(`/parametric-estimations/${id}`).then(r => r.data.data!),
 
-  create: (body: ParametricInputs & {
-    task_title: string; project_id?: string; project_name?: string; description?: string; work_group?: string;
+  create: (body: ParametricInputs & TaskHierarchyPayload & {
+    task_title: string; description?: string; work_group?: string;
   }) => api.post<{ success: boolean; data: ParametricEstimation }>('/parametric-estimations', body).then(r => r.data.data!),
 
-  batchImport: (rows: (ParametricInputs & {
-    task_title: string; project_id?: string; project_name?: string; description?: string; work_group?: string;
+  update: (id: string, body: Partial<TaskHierarchyPayload & { task_title: string; description: string | null; work_group: string | null }>) =>
+    api.put<{ success: boolean; data: ParametricEstimation }>(`/parametric-estimations/${id}`, body).then(r => r.data.data!),
+
+  /** Records or corrects actual effort (PersonDays). Omitted notes are kept; null/'' clears them. */
+  recordActuals: (id: string, body: { actual_days: number; notes?: string | null; completed_at?: string }) =>
+    api.patch<{ success: boolean; data: ParametricEstimation }>(`/parametric-estimations/${id}/actuals`, body).then(r => r.data.data!),
+
+  batchImport: (hierarchy: TaskHierarchyPayload, rows: (ParametricInputs & {
+    task_title: string; description?: string; work_group?: string;
   })[]) =>
-    api.post<{ success: boolean; created: number; errors: { row: number; error: string }[] }>('/parametric-estimations/import', { rows }).then(r => r.data),
+    api.post<{ success: boolean; created: number; errors: { row: number; error: string }[] }>('/parametric-estimations/import', { hierarchy, rows }).then(r => r.data),
 };
 
 // ─── Parametric Analysis ──────────────────────────────────────────────────────────
@@ -388,6 +519,11 @@ export const parametricAnalysisApi = {
     api.get<{ success: boolean; data: ParametricConfigBreakdown[] }>('/parametric-analysis/config', { params }).then(r => r.data.data!),
   getTrend: (params?: Record<string, unknown>) =>
     api.get<{ success: boolean; data: ParametricTrendPoint[] }>('/parametric-analysis/trend', { params }).then(r => r.data.data!),
+  /** Estimation Activity for a From/To range (YYYY-MM-DD) in the caller time zone. */
+  getActivity: (params: Record<string, unknown>) =>
+    api.get<{ success: boolean } & ActivityResponse<ParametricTrendPoint>>('/parametric-analysis/trend', { params }).then(r => ({ data: r.data.data, meta: r.data.meta })),
+  getActuals: (params?: Record<string, unknown>) =>
+    api.get<{ success: boolean; data: ParametricActualsAnalysis }>('/parametric-analysis/actuals', { params }).then(r => r.data.data!),
 };
 
 // ─── Analysis ─────────────────────────────────────────────────────────────────
@@ -402,6 +538,9 @@ export const analysisApi = {
     api.get<{ success: boolean; data: ScatterPoint[] }>('/analysis/scatter', { params }).then(r => r.data.data!),
   getTrend: (params?: Record<string, unknown>) =>
     api.get<{ success: boolean; data: TrendPoint[] }>('/analysis/trend', { params }).then(r => r.data.data!),
+  /** Estimation Activity for a From/To range (YYYY-MM-DD) in the caller time zone. */
+  getActivity: (params: Record<string, unknown>) =>
+    api.get<{ success: boolean } & ActivityResponse<TrendPoint>>('/analysis/trend', { params }).then(r => ({ data: r.data.data, meta: r.data.meta })),
 };
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -463,3 +602,27 @@ export const monitoringApi = {
 };
 
 export default api;
+
+// ─── Estimation Performance (EFA / ED / EBI / EEI) ──────────────────────────────
+export const performanceApi = {
+  dashboard: (params: Record<string, unknown>) =>
+    api.get<{ success: boolean; data: PerformanceDashboard }>('/performance/dashboard', { params }).then(r => r.data.data),
+  breakdown: <T = PerfGroupRow>(params: Record<string, unknown> & { groupBy: PerfGroupBy }) =>
+    api.get<{ success: boolean; data: T[]; meta: { excluded_records: number } }>('/performance/breakdown', { params }).then(r => r.data),
+  baselines: (params?: Record<string, unknown>) =>
+    api.get<{ success: boolean; data: PerfHistoricalBaseline[] }>('/performance/baselines', { params }).then(r => r.data.data),
+  createBaseline: (body: HistoricalBaselineInput) =>
+    api.post<{ success: boolean; data: PerfHistoricalBaseline }>('/performance/baselines', body).then(r => r.data.data),
+  updateBaseline: (id: string, body: HistoricalBaselineInput) =>
+    api.put<{ success: boolean; data: PerfHistoricalBaseline }>(`/performance/baselines/${id}`, body).then(r => r.data.data),
+  setBaselineStatus: (id: string, is_active: boolean) =>
+    api.patch<{ success: boolean; data: PerfHistoricalBaseline }>(`/performance/baselines/${id}/status`, { is_active }).then(r => r.data.data),
+  settings: () => api.get<{ success: boolean; data: KpiSettings }>('/performance/settings').then(r => r.data.data),
+  updateSettings: (body: KpiSettings) =>
+    api.put<{ success: boolean; data: KpiSettings }>('/performance/settings', body).then(r => r.data.data),
+  snapshots: () => api.get<{ success: boolean; data: SnapshotSummary[] }>('/performance/snapshots').then(r => r.data.data),
+  snapshot: (id: string) =>
+    api.get<{ success: boolean; data: SnapshotSummary & { result: PerformanceDashboard } }>(`/performance/snapshots/${id}`).then(r => r.data.data),
+  createSnapshot: (label: string, filters: Record<string, unknown>) =>
+    api.post<{ success: boolean; data: { id: string; label: string; created_at: string } }>('/performance/snapshots', { label, filters }).then(r => r.data.data),
+};

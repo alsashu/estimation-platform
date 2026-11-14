@@ -342,7 +342,7 @@ export default function DocsPage() {
 
             <SubSection title="Estimation Activity Chart">
               <p className="text-sm text-coolslate leading-relaxed">
-                Area chart showing daily estimation counts over the last 30 days. The dark line = total created; green line = completed. The <strong className="text-carbon dark:text-white">Bias badge</strong> (top-right) shows whether the team is Under-estimating, Over-estimating, or Accurate based on average variance across all completed records.
+                Area chart of estimations created (dark line) and completed (green line) over a selectable period — the last 30 days by default. Pick a From Date and To Date and press Apply (Reset returns to the last 30 days); ranges up to 62 days are shown per day, up to a year per week, longer per month. It follows the Department / Program / Baseline filters. The <strong className="text-carbon dark:text-white">Bias badge</strong> (top-right) shows whether the team is Under-estimating, Over-estimating, or Accurate based on average variance across all completed records.
               </p>
             </SubSection>
 

@@ -3,7 +3,8 @@ import { Download, UploadCloud, FileSpreadsheet, CheckCircle, AlertCircle, Loade
 import { Modal, Button } from '../../components/ui';
 import { estimationsApi } from '../../services/api';
 import { useConnectionStore } from '../../store';
-import { useProjectStore } from '../../store/projectStore';
+import { HierarchySelector, EMPTY_SELECTION, isHierarchyComplete, toHierarchyPayload } from '../../components/hierarchy/HierarchySelector';
+import type { HierarchySelection } from '../../types';
 import { cn } from '../../utils/formatters';
 
 const COMPLEXITY_OPTIONS = ['Low', 'Medium', 'High', 'Very High', 'Unmanageable'] as const;
@@ -39,12 +40,11 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
-  projectId?: string | null;
 }
 
 type Phase = 'upload' | 'preview' | 'importing' | 'done';
 
-export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
+export function ImportModal({ isOpen, onClose, onSuccess }: Props) {
   const [phase, setPhase]       = useState<Phase>('upload');
   const [rows, setRows]         = useState<ParsedRow[]>([]);
   const [fileName, setFileName] = useState('');
@@ -52,8 +52,9 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const { projects } = useProjectStore();
-  const activeProject = projectId ? projects.find(p => p.id === projectId) : null;
+  // Every imported row is created under this Department → Program → Baseline (→ Component → Subcomponent)
+  const [hierarchy, setHierarchy] = useState<HierarchySelection>(EMPTY_SELECTION);
+  const hierarchyOk = isHierarchyComplete(hierarchy);
 
   const reset = () => { setPhase('upload'); setRows([]); setFileName(''); setResult(null); };
   const handleClose = () => { reset(); onClose(); };
@@ -81,6 +82,7 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
       ['', ''],
       ['Note', 'Row 2 in the Import Template is an example — delete it before importing your data.'],
       ['Note', 'Fields marked * are required. Estimated Hours and Actual Hours are entered manually after import.'],
+      ['Note', 'Department, Program and Baseline (and optional Component / Subcomponent) are chosen in the import dialog and applied to every row. The "Project Name" column is kept for compatibility with older templates and is ignored.'],
     ]);
     refWs['!cols'] = [{ wch: 15 }, { wch: 60 }];
     XLSX.utils.book_append_sheet(wb, refWs, 'Valid Values');
@@ -167,7 +169,7 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
   // ── Import ────────────────────────────────────────────────────────────────
   const handleImport = async () => {
     const valid = rows.filter(r => r.valid);
-    if (!valid.length) return;
+    if (!valid.length || !hierarchyOk) return;
 
     if (!useConnectionStore.getState().isOnline) {
       setResult({ created: 0, errors: [{ row: 0, error: 'Import is not available in offline mode. Go to Settings → Connection and switch back to Online, then try again.' }] });
@@ -178,10 +180,9 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
     setPhase('importing');
     try {
       const res = await estimationsApi.batchImport(
+        toHierarchyPayload(hierarchy),
         valid.map(r => ({
           title:        r.title,
-          project_name: r.project_name  || undefined,
-          project_id:   projectId       || undefined,
           description:  r.description   || undefined,
           complexity:   r.complexity,
           risk:         r.risk,
@@ -209,7 +210,7 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
     ) : phase === 'preview' ? (
       <>
         <Button variant="outline" onClick={reset}>← Back</Button>
-        <Button onClick={handleImport} disabled={validCount === 0}>
+        <Button onClick={handleImport} disabled={validCount === 0 || !hierarchyOk} title={hierarchyOk ? undefined : 'Select Department, Program and Baseline first'}>
           Import {validCount} record{validCount !== 1 ? 's' : ''}
           {errorCount > 0 ? ` (skip ${errorCount} invalid)` : ''}
         </Button>
@@ -235,18 +236,13 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
             </Button>
           </div>
 
-          {/* Project context */}
-          <div className={cn(
-            'flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs',
-            activeProject
-              ? 'bg-carbon/5 dark:bg-slate-800/40 border-carbon/15 dark:border-slate-600 text-carbon dark:text-white'
-              : 'bg-lgrayblue/10 dark:bg-slate-800/20 border-lgrayblue/20 dark:border-slate-700 text-coolslate'
-          )}>
-            <FileSpreadsheet size={13} className="flex-shrink-0" />
-            {activeProject
-              ? <span>Records will be imported into <span className="font-semibold">{activeProject.name}</span></span>
-              : <span>No project selected — records will not be associated with any project. Select a project from the top navigation before importing.</span>
-            }
+          {/* Destination hierarchy */}
+          <div className="p-4 rounded-xl border border-lgrayblue/30 dark:border-slate-700 space-y-3">
+            <div>
+              <p className="text-sm font-semibold text-carbon dark:text-white">Step 2 — Choose where to import</p>
+              <p className="text-xs text-coolslate mt-0.5">All rows are created under this Department, Program and Baseline. Component and Subcomponent are optional.</p>
+            </div>
+            <HierarchySelector value={hierarchy} onChange={setHierarchy} layout="grid" />
           </div>
 
           {/* Drop zone */}
@@ -282,6 +278,9 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
       )}
 
       {/* ── Preview ─────────────────────────────────────────────────────── */}
+      {phase === 'preview' && !hierarchyOk && (
+        <p className="text-xs text-vibrant mb-3">Go back and select a Department, Program and Baseline before importing.</p>
+      )}
       {phase === 'preview' && (
         <div className="space-y-3">
           {/* Summary row */}
@@ -310,7 +309,7 @@ export function ImportModal({ isOpen, onClose, onSuccess, projectId }: Props) {
               <table className="w-full text-xs">
                 <thead className="sticky top-0 z-10 bg-lgrayblue/20 dark:bg-carbon-800/90">
                   <tr>
-                    {['Row', 'Title', 'Project', 'Complexity', 'Risk', 'Competency', 'Work Group', 'Validation'].map(h => (
+                    {['Row', 'Title', 'Project (ignored)', 'Complexity', 'Risk', 'Competency', 'Work Group', 'Validation'].map(h => (
                       <th key={h} className="px-3 py-2.5 text-left font-semibold text-coolslate uppercase tracking-wide whitespace-nowrap first:pl-4">{h}</th>
                     ))}
                   </tr>

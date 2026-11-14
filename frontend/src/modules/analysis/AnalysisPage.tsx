@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart3, TrendingUp, AlertCircle, CheckCircle, Download } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ScatterChart, Scatter, ReferenceLine, Cell } from 'recharts';
 import { analysisApi } from '../../services/api';
-import { useProjectStore } from '../../store/projectStore';
+import { HierarchyFilterBar, usePageHierarchyFilter } from '../../components/hierarchy/HierarchyFilterBar';
+import { EffortBreakdown } from '../../components/hierarchy/EffortBreakdown';
 import { StatCard, Card, Badge, Skeleton, Button, EmptyState } from '../../components/ui';
 import { fmt, accuracyBg, cn } from '../../utils/formatters';
 import { COMPLEXITY_COLORS, SP_COLORS } from '../../config/theme';
@@ -17,18 +18,20 @@ const PERIOD_OPTIONS = [
 
 export default function AnalysisPage() {
   const [period, setPeriod] = useState(90);
-  const { selectedProjectId } = useProjectStore();
+  const { filter, setFilter, params: scope } = usePageHierarchyFilter();
+  // Day-precision so the value (and every query key built from it) is stable between renders
+  const dateFrom = useMemo(() => {
+    const d = new Date(Date.now() - period * 24 * 60 * 60 * 1000);
+    d.setHours(0, 0, 0, 0);
+    return d.toISOString();
+  }, [period]);
+  const params = useMemo(() => ({ from: dateFrom, ...scope }), [dateFrom, scope]);
+  const scopeKey = JSON.stringify(scope);
 
-  const dateFrom = new Date(Date.now() - period * 24 * 60 * 60 * 1000).toISOString();
-  const params = {
-    from: dateFrom,
-    ...(selectedProjectId ? { projectId: selectedProjectId } : {}),
-  };
-
-  const { data: summary, isLoading: sumLoading } = useQuery({ queryKey: ['summary', period, selectedProjectId], queryFn: () => analysisApi.getSummary(params), retry: false });
-  const { data: complexity } = useQuery({ queryKey: ['complexity', period, selectedProjectId], queryFn: () => analysisApi.getByComplexity(params), retry: false });
-  const { data: spBands } = useQuery({ queryKey: ['sp-bands', period, selectedProjectId], queryFn: () => analysisApi.getSPBands(params), retry: false });
-  const { data: scatter } = useQuery({ queryKey: ['scatter', period, selectedProjectId], queryFn: () => analysisApi.getScatter(params), retry: false });
+  const { data: summary, isLoading: sumLoading } = useQuery({ queryKey: ['summary', period, scopeKey], queryFn: () => analysisApi.getSummary(params), retry: false });
+  const { data: complexity } = useQuery({ queryKey: ['complexity', period, scopeKey], queryFn: () => analysisApi.getByComplexity(params), retry: false });
+  const { data: spBands } = useQuery({ queryKey: ['sp-bands', period, scopeKey], queryFn: () => analysisApi.getSPBands(params), retry: false });
+  const { data: scatter } = useQuery({ queryKey: ['scatter', period, scopeKey], queryFn: () => analysisApi.getScatter(params), retry: false });
 
   const biasColor = summary?.bias === 'accurate' ? 'success' : 'warning';
 
@@ -54,6 +57,8 @@ export default function AnalysisPage() {
           <Button variant="outline" size="sm" icon={<Download size={14} />}>Export</Button>
         </div>
       </div>
+
+      <HierarchyFilterBar value={filter} onChange={setFilter} depth="subcomponent" />
 
       {/* KPIs */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -190,6 +195,9 @@ export default function AnalysisPage() {
           )}
         </Card>
       </div>
+
+      {/* Department / Program / Baseline / Component / Subcomponent / Task — Estimated vs Actual */}
+      <EffortBreakdown module="sp" params={params} />
     </div>
   );
 }

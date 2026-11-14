@@ -11,7 +11,7 @@ export function ProjectMappingSection() {
   const { addToast } = useToastStore();
 
   const { data: projectsRes, isLoading: loadingProjects } = useQuery({
-    queryKey: ['projects', { limit: 200 }],
+    queryKey: ['programs', 'parametric-mapping'],
     queryFn: () => projectsApi.list({ limit: 200 }),
     retry: false,
   });
@@ -22,8 +22,8 @@ export function ProjectMappingSection() {
     mutationFn: ({ projectId, body }: { projectId: string; body: { parametric_average_config_id?: string | null; parametric_expert_config_id?: string | null } }) =>
       parametricMasterApi.setProjectConfig(projectId, body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['projects'] });
-      addToast({ type: 'success', title: 'Project mapping updated' });
+      qc.invalidateQueries({ queryKey: ['programs'] });
+      addToast({ type: 'success', title: 'Program mapping updated' });
     },
     onError: (e: Error) => addToast({ type: 'error', title: 'Error', message: e.message }),
   });
@@ -33,18 +33,18 @@ export function ProjectMappingSection() {
   return (
     <Card padding="p-0">
       <div className="px-5 py-4 border-b border-lgrayblue/30 dark:border-slate-700">
-        <h2 className="font-semibold text-carbon dark:text-white text-sm">Project → Configuration Mapping</h2>
-        <p className="text-xs text-coolslate mt-0.5">Choose which Average and Expert Judgement configuration each project uses. Leave as "Use default" to follow whichever configuration is currently marked default.</p>
+        <h2 className="font-semibold text-carbon dark:text-white text-sm">Program → Configuration Mapping</h2>
+        <p className="text-xs text-coolslate mt-0.5">Choose which Average and Expert Judgement configuration each program uses. Leave as "Use default" to follow whichever configuration is currently marked default.</p>
       </div>
 
       {loadingProjects ? (
         <div className="p-5 space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
       ) : projects.length === 0 ? (
-        <EmptyState icon={<FolderOpen size={28} />} title="No projects found" />
+        <EmptyState icon={<FolderOpen size={28} />} title="No programs found" />
       ) : (
         <table className="w-full">
           <thead><tr className="border-b border-lgrayblue/20 dark:border-slate-700">
-            {['Project', 'Average Estimation Config', 'Expert Judgement Config'].map(h => (
+            {['Program', 'Average Estimation Config', 'Expert Judgement Config'].map(h => (
               <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-coolslate uppercase tracking-wide">{h}</th>
             ))}
           </tr></thead>

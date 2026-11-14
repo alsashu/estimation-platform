@@ -3,6 +3,11 @@ import * as regsController from '../../controllers/registrations.controller';
 import type { JwtPayload } from '../../auth/jwt';
 
 jest.mock('../../config/database', () => ({ query: jest.fn(), queryOne: jest.fn() }));
+jest.mock('../../services/estimationAccess.service', () => ({
+  ...jest.requireActual('../../services/estimationAccess.service'),
+  setUserModules: jest.fn().mockResolvedValue({ before: [], after: [], added: [], removed: [] }),
+  getUserModules: jest.fn().mockResolvedValue([]),
+}));
 jest.mock('../../services/audit.service', () => ({ auditLog: jest.fn() }));
 jest.mock('../../services/notification.service', () => ({
   createNotification: jest.fn(),
@@ -23,7 +28,7 @@ function mockRes() {
 const adminUser: JwtPayload = {
   userId: 'admin-1', email: 'admin@test.com', username: 'admin',
   roles: ['Admin'], permissions: ['registration.approve'],
-  projectIds: ['proj-1'],
+  projectIds: ['proj-1'], modules: ['SP', 'PE'],
 };
 
 describe('registrationsController.listRegistrations', () => {
@@ -79,7 +84,7 @@ describe('registrationsController.approveRegistration', () => {
 
   it('returns 404 for unknown registration', async () => {
     mockQueryOne.mockResolvedValueOnce(null);
-    const req = { user: adminUser, params: { id: 'x' }, body: {} } as unknown as Request;
+    const req = { user: adminUser, params: { id: 'x' }, body: { modules: ['PE'] } } as unknown as Request;
     const res = mockRes();
     await regsController.approveRegistration(req, res);
     expect(res.status).toHaveBeenCalledWith(404);
@@ -87,7 +92,7 @@ describe('registrationsController.approveRegistration', () => {
 
   it('returns 400 if already processed (not pending)', async () => {
     mockQueryOne.mockResolvedValueOnce({ id: 'r1', status: 'approved', password_hash: 'h' });
-    const req = { user: adminUser, params: { id: 'r1' }, body: {} } as unknown as Request;
+    const req = { user: adminUser, params: { id: 'r1' }, body: { modules: ['PE'] } } as unknown as Request;
     const res = mockRes();
     await regsController.approveRegistration(req, res);
     expect(res.status).toHaveBeenCalledWith(400);
@@ -102,7 +107,7 @@ describe('registrationsController.approveRegistration', () => {
     mockQuery
       .mockResolvedValueOnce([{ id: 'new-user-id' }])
       .mockResolvedValue([]);
-    const req = { user: adminUser, params: { id: 'r1' }, body: {} } as unknown as Request;
+    const req = { user: adminUser, params: { id: 'r1' }, body: { modules: ['PE'] } } as unknown as Request;
     const res = mockRes();
     await regsController.approveRegistration(req, res);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));

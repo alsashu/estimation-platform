@@ -4,11 +4,12 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { ToastContainer } from '../ui';
 import { useToastStore, useNotificationStore } from '../../store';
-import { notificationsApi, projectsApi } from '../../services/api';
+import { useQuery } from '@tanstack/react-query';
+import { notificationsApi, hierarchyApi } from '../../services/api';
 import { useTheme } from '../../hooks/useTheme';
 import { useSyncQueue } from '../../hooks/useSyncQueue';
 import { useAuthStore } from '../../store/authStore';
-import { useProjectStore } from '../../store/projectStore';
+import { useHierarchyStore } from '../../store/hierarchyStore';
 
 export function AppShell() {
   useTheme();
@@ -16,20 +17,21 @@ export function AppShell() {
   const { toasts, removeToast } = useToastStore();
   const { setNotifications } = useNotificationStore();
   const { user } = useAuthStore();
-  const { setProjects, reset: resetProject } = useProjectStore();
+  const { setContext, reset: resetContext } = useHierarchyStore();
 
-  // Initialize project context when user changes
+  // Department / Program context for the header (permission-filtered by the API).
+  // Admin pages invalidate ['hierarchy-context'] after changing master data.
+  const { data: hierarchyContext } = useQuery({
+    queryKey: ['hierarchy-context', user?.id],
+    queryFn: hierarchyApi.context,
+    enabled: !!user,
+    staleTime: 60_000,
+  });
+
   useEffect(() => {
-    if (!user) {
-      resetProject();
-      return;
-    }
-    projectsApi.list({ limit: 100 }).then(res => {
-      setProjects(res.data, user.projectIds);
-    }).catch(() => {
-      // Graceful — don't block the app if projects fail to load
-    });
-  }, [user?.id]);
+    if (!user) { resetContext(); return; }
+    if (hierarchyContext) setContext(hierarchyContext);
+  }, [user?.id, hierarchyContext]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll notifications
   useEffect(() => {

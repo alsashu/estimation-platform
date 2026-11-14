@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart3, TrendingUp, Target, Percent, Sigma, Layers } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from 'recharts';
 import { parametricAnalysisApi } from '../../services/api';
-import { useProjectStore } from '../../store/projectStore';
+import { HierarchyFilterBar, usePageHierarchyFilter } from '../../components/hierarchy/HierarchyFilterBar';
+import { EffortBreakdown } from '../../components/hierarchy/EffortBreakdown';
+import { ParametricActualsKpis, ParametricActualsCharts } from './ParametricActualsInsights';
 import { StatCard, Card, Badge, EmptyState } from '../../components/ui';
 import { cn } from '../../utils/formatters';
 import { PARAMETRIC_SIZE_COLORS, CHART_COLORS } from '../../config/theme';
@@ -25,15 +27,20 @@ const FIELD_LABELS: Record<string, string> = {
 
 export default function ParametricAnalysisPage() {
   const [period, setPeriod] = useState(90);
-  const { selectedProjectId } = useProjectStore();
+  const { filter, setFilter, params: scope } = usePageHierarchyFilter();
+  // Day-precision so the value (and every query key built from it) is stable between renders
+  const dateFrom = useMemo(() => {
+    const d = new Date(Date.now() - period * 24 * 60 * 60 * 1000);
+    d.setHours(0, 0, 0, 0);
+    return d.toISOString();
+  }, [period]);
+  const params = useMemo(() => ({ from: dateFrom, ...scope }), [dateFrom, scope]);
+  const scopeKey = JSON.stringify(scope);
 
-  const dateFrom = new Date(Date.now() - period * 24 * 60 * 60 * 1000).toISOString();
-  const params = { from: dateFrom, ...(selectedProjectId ? { projectId: selectedProjectId } : {}) };
-
-  const { data: summary, isLoading: sumLoading } = useQuery({ queryKey: ['parametric-analysis-summary-full', period, selectedProjectId], queryFn: () => parametricAnalysisApi.getSummary(params), retry: false });
-  const { data: sizeDist } = useQuery({ queryKey: ['parametric-size-dist', period, selectedProjectId], queryFn: () => parametricAnalysisApi.getSizeDistribution(params), retry: false });
-  const { data: workGroups } = useQuery({ queryKey: ['parametric-work-group-full', period, selectedProjectId], queryFn: () => parametricAnalysisApi.getByWorkGroup(params), retry: false });
-  const { data: configs } = useQuery({ queryKey: ['parametric-config-breakdown', period, selectedProjectId], queryFn: () => parametricAnalysisApi.getByConfig(params), retry: false });
+  const { data: summary, isLoading: sumLoading } = useQuery({ queryKey: ['parametric-analysis-summary-full', period, scopeKey], queryFn: () => parametricAnalysisApi.getSummary(params), retry: false });
+  const { data: sizeDist } = useQuery({ queryKey: ['parametric-size-dist', period, scopeKey], queryFn: () => parametricAnalysisApi.getSizeDistribution(params), retry: false });
+  const { data: workGroups } = useQuery({ queryKey: ['parametric-work-group-full', period, scopeKey], queryFn: () => parametricAnalysisApi.getByWorkGroup(params), retry: false });
+  const { data: configs } = useQuery({ queryKey: ['parametric-config-breakdown', period, scopeKey], queryFn: () => parametricAnalysisApi.getByConfig(params), retry: false });
 
   const sizeChartData = (sizeDist || []).map(d => ({ ...d, label: FIELD_LABELS[d.field] || d.field }));
   const configPie = (configs || []).map((c, i) => ({ name: c.expert_config_name, value: Number(c.count), color: CHART_COLORS[i % CHART_COLORS.length] }));
@@ -57,6 +64,8 @@ export default function ParametricAnalysisPage() {
           ))}
         </div>
       </div>
+
+      <HierarchyFilterBar value={filter} onChange={setFilter} depth="subcomponent" />
 
       {/* KPIs */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -153,6 +162,16 @@ export default function ParametricAnalysisPage() {
           </div>
         )}
       </Card>
+
+      {/* Estimated vs Actual (PersonDays) */}
+      <div className="space-y-5">
+        <h2 className="text-base font-semibold text-carbon dark:text-white">Estimated vs Actual effort</h2>
+        <ParametricActualsKpis summary={summary} loading={sumLoading} />
+        <ParametricActualsCharts params={params} queryKey={[period, scopeKey]} />
+      </div>
+
+      {/* Department / Program / Baseline / Component / Subcomponent / Task — Estimated vs Actual */}
+      <EffortBreakdown module="pe" params={params} />
     </div>
   );
 }

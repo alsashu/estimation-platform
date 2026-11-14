@@ -163,12 +163,12 @@ export default function RegisterPage() {
 
             {projects.length > 0 && (
               <div>
-                <label className="text-sm font-medium text-carbon dark:text-lgrayblue block mb-1">Requested Project</label>
+                <label className="text-sm font-medium text-carbon dark:text-lgrayblue block mb-1">Requested Program</label>
                 <select
                   value={form.requestedProjectId} onChange={e => update('requestedProjectId', e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-lgrayblue/50 dark:border-slate-600 bg-white dark:bg-carbon-700 text-carbon dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-carbon/20"
                 >
-                  <option value="">Select a project (optional)</option>
+                  <option value="">Select a program (optional)</option>
                   {projects.map(p => <option key={p.id} value={p.id}>{p.name} ({p.code})</option>)}
                 </select>
               </div>

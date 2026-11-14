@@ -26,10 +26,21 @@ const PERMISSIONS = [
   // Master data
   { name: 'master.read',           module: 'master',       desc: 'Read master data' },
   { name: 'master.write',          module: 'master',       desc: 'Create/update/delete master data' },
+  // Organisational hierarchy (Department → Program → Baseline → Component → Subcomponent)
+  { name: 'department.read',       module: 'department',   desc: 'Read departments' },
+  { name: 'department.create',     module: 'department',   desc: 'Create departments' },
+  { name: 'department.update',     module: 'department',   desc: 'Update / activate / deactivate departments' },
+  { name: 'department.assign',     module: 'department',   desc: 'Assign users to departments and manage department-level access' },
+  { name: 'baseline.read',         module: 'baseline',     desc: 'Read baselines, components and subcomponents' },
+  { name: 'baseline.create',       module: 'baseline',     desc: 'Create baselines' },
+  { name: 'baseline.update',       module: 'baseline',     desc: 'Update / activate / deactivate baselines' },
+  { name: 'baseline.delete',       module: 'baseline',     desc: 'Delete empty baselines' },
+  { name: 'component.manage',      module: 'baseline',     desc: 'Create/update/delete components and subcomponents' },
   // Parametric estimation
   { name: 'parametric.create',        module: 'parametric', desc: 'Create parametric estimations' },
   { name: 'parametric.read',          module: 'parametric', desc: 'Read parametric estimations' },
   { name: 'parametric.import',        module: 'parametric', desc: 'Bulk import parametric estimations via Excel' },
+  { name: 'parametric.actuals.correct', module: 'parametric', desc: 'Correct actual effort recorded on a parametric task by another user' },
   { name: 'parametric.master.read',   module: 'parametric', desc: 'Read parametric master data (Average / Expert Judgement)' },
   { name: 'parametric.master.write',  module: 'parametric', desc: 'Create/update/delete parametric master data' },
   // Roles & Permissions
@@ -39,6 +50,8 @@ const PERMISSIONS = [
   { name: 'permission.manage',     module: 'permission',   desc: 'Assign permissions to roles' },
   // Registration
   { name: 'registration.approve',  module: 'registration', desc: 'Approve/reject registrations' },
+  // Estimation performance dashboard (EFA / ED / EBI / EEI)
+  { name: 'performance.baseline.manage', module: 'performance', desc: 'Manage governed pre-framework historical baselines and KPI thresholds for the Estimation Performance dashboard' },
   // Monitoring
   { name: 'monitoring.read',       module: 'monitoring',   desc: 'Access monitoring and logs' },
   // Audit
@@ -63,16 +76,20 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'estimation.create', 'estimation.read', 'estimation.update', 'estimation.delete', 'estimation.import',
     'user.create', 'user.read', 'user.update', 'user.activate',
     'project.read', 'project.assign',
+    'department.read',
+    'baseline.read', 'baseline.create', 'baseline.update', 'component.manage',
     'master.read',
     'role.read',
     'permission.read',
     'registration.approve',
     'parametric.create', 'parametric.read', 'parametric.import',
-    'parametric.master.read', 'parametric.master.write',
+    'parametric.master.read', 'parametric.master.write', 'parametric.actuals.correct',
+    'performance.baseline.manage',
   ],
   'User': [
     'estimation.create', 'estimation.read', 'estimation.update',
     'project.read',
+    'department.read', 'baseline.read',
     'master.read',
     'parametric.create', 'parametric.read', 'parametric.import',
     'parametric.master.read',
@@ -149,8 +166,9 @@ export async function seedEnterpriseData(client: PoolClient): Promise<void> {
   // ── Projects ──
   for (const p of PROJECTS) {
     await client.query(
-      `INSERT INTO projects (name, code, description)
-       VALUES ($1,$2,$3) ON CONFLICT (name) DO NOTHING`,
+      `INSERT INTO projects (name, code, description, department_id)
+       VALUES ($1,$2,$3,(SELECT id FROM departments WHERE UPPER(code) = 'UNASSIGNED'))
+       ON CONFLICT (name) DO NOTHING`,
       [p.name, p.code, p.desc]
     );
   }
@@ -196,6 +214,12 @@ export async function seedEnterpriseData(client: PoolClient): Promise<void> {
       await client.query(
         `INSERT INTO project_users (project_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
         [projRow.rows[0].id, userId]
+      );
+      // Program access always implies membership of the program's department
+      await client.query(
+        `INSERT INTO user_departments (user_id, department_id)
+         SELECT $1, department_id FROM projects WHERE id = $2 ON CONFLICT DO NOTHING`,
+        [userId, projRow.rows[0].id]
       );
     }
   }

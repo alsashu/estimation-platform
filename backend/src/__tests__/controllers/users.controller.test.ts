@@ -3,6 +3,11 @@ import * as usersController from '../../controllers/users.controller';
 import type { JwtPayload } from '../../auth/jwt';
 
 jest.mock('../../config/database', () => ({ query: jest.fn(), queryOne: jest.fn() }));
+jest.mock('../../services/estimationAccess.service', () => ({
+  ...jest.requireActual('../../services/estimationAccess.service'),
+  setUserModules: jest.fn(),
+  getUserModules: jest.fn(),
+}));
 jest.mock('../../services/audit.service', () => ({ auditLog: jest.fn() }));
 jest.mock('../../services/notification.service', () => ({ createNotification: jest.fn() }));
 jest.mock('../../auth/password', () => ({
@@ -21,6 +26,8 @@ beforeEach(() => {
   // Re-apply persistent mocks that are reset by resetAllMocks
   (require('../../auth/password').hashPassword as jest.Mock).mockResolvedValue('hashed');
   (require('../../auth/password').validatePasswordPolicy as jest.Mock).mockReturnValue(null);
+  (require('../../services/estimationAccess.service').setUserModules as jest.Mock).mockResolvedValue({ before: [], after: [], added: [], removed: [] });
+  (require('../../services/estimationAccess.service').getUserModules as jest.Mock).mockResolvedValue([]);
 });
 
 function mockRes() {
@@ -30,7 +37,7 @@ function mockRes() {
 const gsaUser: JwtPayload = {
   userId: 'gsa-id', email: 'gsa@test.com', username: 'gsa',
   roles: ['Global Super Admin'], permissions: ['user.create', 'user.read', 'user.update', 'user.delete'],
-  projectIds: '*',
+  projectIds: '*', modules: ['SP', 'PE'],
 };
 
 const PROJ_1 = '11111111-1111-1111-1111-111111111111';
@@ -41,7 +48,7 @@ const SA_ROLE = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const adminUser: JwtPayload = {
   userId: 'admin-id', email: 'admin@test.com', username: 'admin',
   roles: ['Admin'], permissions: ['user.create', 'user.read', 'user.update', 'user.delete', 'user.activate'],
-  projectIds: [PROJ_1, PROJ_2],
+  projectIds: [PROJ_1, PROJ_2], modules: ['SP', 'PE'],
 };
 
 // ── listUsers ─────────────────────────────────────────────────────────────────
@@ -141,7 +148,7 @@ describe('usersController.createUser', () => {
     mockQueryOne.mockResolvedValueOnce({ id: 'existing' });
     const req = {
       user: gsaUser,
-      body: { firstName: 'J', lastName: 'D', username: 'jd_user', email: 'j@d.com', password: 'Pass@123', roleIds: [] },
+      body: { firstName: 'J', lastName: 'D', username: 'jd_user', email: 'j@d.com', password: 'Pass@123', roleIds: [], modules: ['SP'] },
     } as Request;
     const res = mockRes();
     await usersController.createUser(req, res);
@@ -158,7 +165,7 @@ describe('usersController.createUser', () => {
       body: {
         firstName: 'J', lastName: 'D', username: 'jd_test2',
         email: 'jd2@test.com', password: 'Pass@123',
-        roleIds: [], projectIds: [],
+        roleIds: [], projectIds: [], modules: ['SP', 'PE'],
       },
     } as Request;
     const res = mockRes();
@@ -173,7 +180,7 @@ describe('usersController.createUser', () => {
       user: adminUser,
       body: {
         firstName: 'J', lastName: 'D', username: 'jd_u3', email: 'jd3@test.com',
-        password: 'Pass@123', roleIds: [SA_ROLE], projectIds: [],
+        password: 'Pass@123', roleIds: [SA_ROLE], projectIds: [], modules: ['SP'],
       },
     } as Request;
     const res = mockRes();
@@ -188,7 +195,7 @@ describe('usersController.createUser', () => {
       user: adminUser, // has projectIds: [PROJ_1, PROJ_2]
       body: {
         firstName: 'J', lastName: 'D', username: 'jd_u4', email: 'jd4@test.com',
-        password: 'Pass@123', roleIds: [], projectIds: [PROJ_3], // not in admin scope
+        password: 'Pass@123', roleIds: [], projectIds: [PROJ_3], modules: ['SP'], // not in admin scope
       },
     } as Request;
     const res = mockRes();

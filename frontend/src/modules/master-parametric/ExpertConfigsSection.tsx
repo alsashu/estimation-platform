@@ -105,7 +105,7 @@ function ConfigCard({ cfg, onEdit, onDelete, onSetDefault }: {
             {!cfg.is_active && <Badge variant="neutral"><Ban size={9} /> Inactive</Badge>}
           </div>
           {cfg.description && <p className="text-xs text-coolslate mt-0.5">{cfg.description}</p>}
-          <p className="text-xs text-coolslate mt-0.5">{cfg.project_count ?? 0} project(s) mapped</p>
+          <p className="text-xs text-coolslate mt-0.5">{cfg.project_count ?? 0} program(s) mapped</p>
         </div>
         <div className="flex gap-1.5 flex-shrink-0">
           <Button variant="ghost" size="xs" icon={<Edit2 size={13} />} onClick={onEdit}>Edit</Button>

@@ -1,8 +1,29 @@
 import { Request, Response, NextFunction } from 'express';
+import { ZodError } from 'zod';
 import { logger } from '../logger';
 
 export interface AppError extends Error {
   statusCode?: number;
+  /** PostgreSQL error code (e.g. 23505 unique_violation, 23503 foreign_key_violation) */
+  code?: string;
+}
+
+/** Maps errors that are really client mistakes (validation / constraint violations) to 4xx. */
+function resolveStatus(err: AppError): { status: number; message: string } {
+  if (err instanceof ZodError) {
+    const message = err.issues
+      .map(i => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message))
+      .join('; ');
+    return { status: 400, message: message || 'Invalid request' };
+  }
+  if (err.statusCode) return { status: err.statusCode, message: err.message };
+  switch (err.code) {
+    case '23505': return { status: 409, message: 'A record with the same unique value already exists' };
+    case '23503': return { status: 400, message: 'Invalid reference: the related record does not exist or does not match the hierarchy' };
+    case '23514': return { status: 400, message: 'The record violates a data integrity rule' };
+    case '22P02': return { status: 400, message: 'Invalid identifier format' };
+    default:      return { status: 500, message: err.message || 'Internal Server Error' };
+  }
 }
 
 export function errorHandler(
@@ -11,8 +32,7 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
-  const statusCode = err.statusCode ?? 500;
-  const message = err.message || 'Internal Server Error';
+  const { status: statusCode, message } = resolveStatus(err);
 
   logger.error(`${statusCode} ${message}`, {
     category: 'api',

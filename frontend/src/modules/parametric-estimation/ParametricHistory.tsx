@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ClipboardList, FileSpreadsheet, User } from 'lucide-react';
 import { parametricEstimationsApi } from '../../services/api';
-import { useProjectStore } from '../../store/projectStore';
+import { HierarchyFilterBar, usePageHierarchyFilter } from '../../components/hierarchy/HierarchyFilterBar';
+import { HierarchyPath, ReassignHierarchyButton } from '../../components/hierarchy/TaskHierarchy';
+import { useAuthStore } from '../../store/authStore';
 import { Card, Badge, Drawer, EmptyState, SearchInput, Skeleton, Button } from '../../components/ui';
+import { ParametricActualsPanel, accuracyTone, fmt1 } from './ParametricActualsPanel';
 import { fmt } from '../../utils/formatters';
 import type { ParametricEstimation } from '../../types';
 
@@ -12,14 +15,15 @@ function SizeBadge({ size }: { size: string }) {
 }
 
 export function ParametricHistory() {
-  const { selectedProjectId } = useProjectStore();
+  const { filter, setFilter, params: scope } = usePageHierarchyFilter();
+  const canEdit = useAuthStore(s => s.hasPermission('parametric.create'));
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [drawerRow, setDrawerRow] = useState<ParametricEstimation | null>(null);
 
   const params = {
+    ...scope,
     search: search || undefined,
-    project_id: selectedProjectId ?? undefined,
     page, limit: 15,
   };
 
@@ -36,8 +40,11 @@ export function ParametricHistory() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <p className="text-sm text-coolslate">{total} parametric estimation{total !== 1 ? 's' : ''} recorded</p>
-        <div className="w-64"><SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Search task, project…" /></div>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm text-coolslate">{total} parametric estimation{total !== 1 ? 's' : ''} recorded</p>
+          <HierarchyFilterBar value={filter} onChange={(f) => { setFilter(f); setPage(1); }} depth="subcomponent" />
+        </div>
+        <div className="w-64"><SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Search task, program…" /></div>
       </div>
 
       <Card padding="p-0">
@@ -45,7 +52,7 @@ export function ParametricHistory() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-lgrayblue/30 dark:border-slate-700">
-                {['Task', 'Project', 'Inputs', 'Team Eff.', 'Detailed', 'Average', 'Final', 'Source', 'Date', ''].map((h) => (
+                {['Task', 'Program / Baseline', 'Inputs', 'Team Eff.', 'Detailed', 'Average', 'Final (Est.)', 'Actual', 'Accuracy', 'Source', 'Date', ''].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-coolslate uppercase tracking-wide first:pl-5">{h}</th>
                 ))}
               </tr>
@@ -54,11 +61,11 @@ export function ParametricHistory() {
               {isLoading ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={i} className="border-b border-lgrayblue/20 dark:border-slate-700/40">
-                    {Array.from({ length: 10 }).map((_, j) => <td key={j} className="px-4 py-3.5"><Skeleton className="h-4 w-full" /></td>)}
+                    {Array.from({ length: 12 }).map((_, j) => <td key={j} className="px-4 py-3.5"><Skeleton className="h-4 w-full" /></td>)}
                   </tr>
                 ))
               ) : rows.length === 0 ? (
-                <tr><td colSpan={10}>
+                <tr><td colSpan={12}>
                   <EmptyState icon={<ClipboardList size={28} />} title="No parametric estimations yet"
                     message="Save an estimation or import one via Excel to see it here." />
                 </td></tr>
@@ -69,7 +76,7 @@ export function ParametricHistory() {
                     <p className="text-sm font-medium text-carbon dark:text-white truncate max-w-[200px]">{r.task_title}</p>
                     {r.work_group && <p className="text-xs text-coolslate">{r.work_group}</p>}
                   </td>
-                  <td className="px-4 py-3.5 text-sm text-coolslate">{r.project_name || '—'}</td>
+                  <td className="px-4 py-3.5 text-sm max-w-[14rem]"><HierarchyPath task={r} compact /></td>
                   <td className="px-4 py-3.5">
                     <div className="flex flex-wrap gap-1 max-w-[180px]">
                       {[r.middleware_inputs, r.application, r.system_configuration, r.data_and_control_flow, r.use_case].map((s, i) => (
@@ -81,6 +88,10 @@ export function ParametricHistory() {
                   <td className="px-4 py-3.5 text-sm text-carbon dark:text-white">{Number(r.detailed_estimation).toFixed(2)}</td>
                   <td className="px-4 py-3.5 text-sm text-carbon dark:text-white">{Number(r.average_estimation).toFixed(2)}</td>
                   <td className="px-4 py-3.5"><span className="text-sm font-bold text-carbon dark:text-white">{Number(r.final_estimation).toFixed(2)} PD</span></td>
+                  <td className="px-4 py-3.5 text-sm text-carbon dark:text-white">{r.actual_days != null ? `${Number(r.actual_days).toFixed(2)} PD` : <span className="text-coolslate">Not recorded</span>}</td>
+                  <td className="px-4 py-3.5">{r.accuracy_percent != null
+                    ? <Badge variant={accuracyTone(Number(r.accuracy_percent))}>{fmt1(r.accuracy_percent)}%</Badge>
+                    : <span className="text-xs text-coolslate">—</span>}</td>
                   <td className="px-4 py-3.5">
                     <Badge variant={r.source === 'excel_import' ? 'info' : 'neutral'}>{r.source === 'excel_import' ? 'Excel' : 'Manual'}</Badge>
                   </td>
@@ -102,9 +113,15 @@ export function ParametricHistory() {
         )}
       </Card>
 
-      <Drawer isOpen={!!drawerRow} onClose={() => setDrawerRow(null)} title={drawerRow?.task_title || ''} subtitle={drawerRow?.project_name}>
+      <Drawer isOpen={!!drawerRow} onClose={() => setDrawerRow(null)} title={drawerRow?.task_title || ''} subtitle={drawerRow?.program_name ?? 'Unassigned'}>
         {drawerRow && (
           <div className="p-5 space-y-5">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-coolslate uppercase tracking-wide">Hierarchy</p>
+              <HierarchyPath task={drawerRow} />
+              {canEdit && <ReassignHierarchyButton module="pe" task={drawerRow} onDone={() => setDrawerRow(null)} />}
+            </div>
+            <ParametricActualsPanel key={drawerRow.id} row={drawerRow} onSaved={setDrawerRow} />
             <div className="grid grid-cols-2 gap-3">
               {[
                 { l: 'Middleware Inputs', v: drawerRow.middleware_inputs },
